@@ -8,10 +8,10 @@ FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding
 - [Requirements](#requirements)
 - [Before you begin](#before-you-begin)
 - [Beginner overview](#start-here-a-beginners-guide)
-  - [Required GameDB folder setup](#required-gamedb-folder-setup)
-  - [Your first complete car edit](#your-first-complete-car-edit)
-  - [Which buttons require Apply?](#which-buttons-require-apply)
-  - [Output-name cheat sheet](#output-name-cheat-sheet)
+- [Required GameDB folder setup](#required-gamedb-folder-setup)
+- [Your first complete car edit](#your-first-complete-car-edit)
+- [Which buttons require Apply?](#which-buttons-require-apply)
+- [Output-name cheat sheet](#output-name-cheat-sheet)
 - [Section 1: Local Crypto](#section-1-local-crypto)
 - [Section 2: Car Editor](#section-2-car-editor)
 - [Section 3: Save Swap](#section-3-save-swap)
@@ -19,6 +19,7 @@ FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding
 - [Advanced technical reference](#advanced-technical-reference)
 - [Video guide](#video-guide)
 - [Disclaimer](#disclaimer)
+- [Credits](#credits)
 
 ## Features
 
@@ -55,6 +56,8 @@ The tool has three tabs:
 | **Local Crypto** | Decrypt or re-encrypt a GameDB or text asset, extract an encrypted ZIP, or merge database content. |
 | **Car Editor** | Change cars, upgrades, prices, fitment, tires, suspension, drivetrains, engines, motors, or handling. |
 | **Save Swap** | Move the progress payload from one `C_ProfileData` save into another save's container. |
+
+![Local Crypto tab overview](Screenshots/local-crypto-overview.png)
 
 ### The most important concept
 
@@ -195,7 +198,7 @@ Choose option → Apply if required → Export DB → Re-encrypt exported DB →
 | Merge database | `gamedbRC.decrypted.sqlite` | `gamedbRC.decrypted.merged.sqlite` |
 | Build save swap | target `C_ProfileData` | `C_ProfileData.swapped` |
 
-The original input is not intentionally overwritten by these operations.
+The tool does not overwrite the original input during these operations.
 
 ## Section 1: Local Crypto
 
@@ -269,9 +272,15 @@ The current interface decrypts and extracts supported ZIP entries. It does not r
 - **Open folder when done** opens the completed output's location.
 - **Clear log** clears only the on-screen activity history.
 
+The activity log confirms each staged, decrypted, re-encrypted, or extracted file:
+
+![Successful GameDB, text asset, and ZIP operations in the Local Crypto activity log](Screenshots/local-crypto-round-trip-log.png)
+
 ## Section 2: Car Editor
 
 Use this section after creating a decrypted `.sqlite` GameDB through Local Crypto. Car Editor works on a temporary copy, so remember to export the database and re-encrypt that exported file when finished.
+
+![Car Editor before a database is loaded](Screenshots/car-editor-overview.png)
 
 ### Important: prepare and replace modified cars safely
 
@@ -300,6 +309,12 @@ If you modified several cars, remain in a completely unrelated car until fresh c
 
 Changes remain in the temporary working database until **Export DB** is used.
 
+![Loaded Car Editor showing engine choices and fitment options](Screenshots/car-editor-engines-fitment.png)
+
+The type filter can narrow the list to bodykit presets or specific powertrain types:
+
+![Car type and bodykit preset filters](Screenshots/car-filter-bodykits.png)
+
 ### Autoshow and global prices
 
 - **Available in Autoshow** changes availability for the selected car.
@@ -326,6 +341,12 @@ These controls update the working copy immediately, but the database must still 
    - **Convert to Electric — highest-output motor** performs an automatic conversion using the highest-output motor in the loaded database.
 
 Engine and motor actions apply immediately to the working copy. Watch the activity log for skipped or existing entries.
+
+![Motor selection and conversion controls](Screenshots/car-editor-motors-fitment.png)
+
+Converted vehicles are identified in the selected-car details:
+
+![Selected-car details for a converted EV-to-ICE vehicle](Screenshots/converted-car-details.png)
 
 ### Wheels and fitment
 
@@ -397,6 +418,8 @@ Recommended finish:
 Use Save Swap when you want to put the progress from one FH6 save into another account's save container. The save containing the progress is the **donor**. The save belonging to the account that will use that progress is the **target**.
 
 The tool writes a new verified file beside your copied target. It does not overwrite either input file.
+
+![Save Swap tab showing donor and target inputs](Screenshots/save-swap-overview.png)
 
 ### Find your C_ProfileData
 
@@ -545,8 +568,16 @@ The required runtime component is included in `lib` and is copied automatically 
 
 ## Video guide
 
-A video walkthrough is planned. Once available, this README can be updated with screenshots, exact menu examples, timestamped chapters, and links to each demonstrated workflow.
+A video walkthrough is planned. Community-made guides are also welcome.
 
 ## Disclaimer
 
-This is an unofficial community utility and is not affiliated with or endorsed by the game publisher or platform holders. Keep backups and use modified files at your own risk.
+FH6 Local Crypto Tool is an unofficial project and is not affiliated with or endorsed by Microsoft, Xbox, Playground Games, or Turn 10 Studios. Keep backups and use modified files at your own risk.
+
+## Credits
+
+- JXRDN — Project creator, feature direction, UI design, research, and extensive in-game testing.
+- Draff — Original Botan-based cryptography work, technical research, reference material, and save-swap guidance. (Made this tool possible)
+- Smidge — Provided the reference database and schema examples that helped make additional upgrade options possible.
+- Codex — Development assistance, debugging, automated round-trip testing, UI refinement, and documentation.
+- The Botan Project — Cryptographic library and runtime used by the application.
