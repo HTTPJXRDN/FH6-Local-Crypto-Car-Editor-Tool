@@ -580,7 +580,7 @@ FH6 Local Crypto Tool is an unofficial project and is not affiliated with or end
 
 - JXRDN — Project creator, feature direction, UI design, research, and extensive in-game testing.
 - Draff — Original Botan-based cryptography work, technical research, reference material, and save-swap guidance. (Made this tool possible)
+- The Botan Project — Cryptographic library and runtime used by the application.
 - Smidge — Provided the reference database and schema examples that helped make additional upgrade options possible.
 - Stalin — Identified and helped correct text-asset round-trip requirements
 - Codex — Development assistance, debugging, automated round-trip testing, UI refinement, and documentation.
-- The Botan Project — Cryptographic library and runtime used by the application.
