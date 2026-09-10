@@ -419,6 +419,8 @@ Use Save Swap when you want to put the progress from one FH6 save into another a
 
 The tool writes a new verified file beside your copied target. It does not overwrite either input file.
 
+> **Testing notice:** Save Swap has passed automated cryptographic and round-trip verification, but JXRDN has not personally completed an in-game save-swap test. Every other advertised V1 feature has been personally tested by JXRDN.
+
 ![Save Swap tab showing donor and target inputs](Screenshots/save-swap-overview.png)
 
 ### Find your C_ProfileData
@@ -579,5 +581,6 @@ FH6 Local Crypto Tool is an unofficial project and is not affiliated with or end
 - JXRDN — Project creator, feature direction, UI design, research, and extensive in-game testing.
 - Draff — Original Botan-based cryptography work, technical research, reference material, and save-swap guidance. (Made this tool possible)
 - Smidge — Provided the reference database and schema examples that helped make additional upgrade options possible.
+- Stalin — Identified and helped correct text-asset round-trip requirements, including CRLF normalization, 512-byte chunking, per-chunk CMAC regeneration, rolling-IV tag encryption, the trailing-NUL count at header offset `0x10`, header authentication, and final HMAC calculation.
 - Codex — Development assistance, debugging, automated round-trip testing, UI refinement, and documentation.
 - The Botan Project — Cryptographic library and runtime used by the application.
