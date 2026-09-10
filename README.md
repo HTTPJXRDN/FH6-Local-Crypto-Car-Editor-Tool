@@ -45,6 +45,8 @@ Building the source requires Windows 10 or Windows 11 and the .NET 8 SDK.
 4. Work on copied files until you have confirmed the result in game.
 5. Read the activity log after every operation. A completed file write does not necessarily mean the game accepted the edited contents.
 
+> **Live SQLite Editor compatibility:** JXRDN has not tested how previously using a Live SQLite Editor may affect a database used with this tool. It is also unknown whether a `.sqlite` file created by a Live SQLite Editor can be safely merged into `gamedbRC.sqlite`. Keep untouched backups and do not assume the two editing workflows are compatible.
+
 ## Start here: a beginner's guide
 
 Download `FH6LocalCryptoTool-v1.0.0-win-x64.exe` from the release assets and run it. The release is a portable application, so there is no installer.
