@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>FH6LocalCryptoTool</AssemblyName>
+    <RootNamespace>FH6LocalCryptoTool</RootNamespace>
+    <Product>FH6 Local Crypto Tool</Product>
+    <Title>FH6 Local Crypto Tool</Title>
+    <Description>Decrypt and re-encrypt FH6 data files, swap saves, and edit cars in one app.</Description>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\ICO\dbtool_icon.ico</ApplicationIcon>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="FH6LocalCrypto.Runtime">
+      <HintPath>lib\FH6LocalCrypto.Runtime.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\ICO\dbtool_icon.ico" />
+    <Resource Include="Assets\Logo\FMLogo_trim.png" />
+    <Resource Include="Assets\Logo\dbtool_icon.png" />
+    <Resource Include="Assets\Logo\db_plain.png" />
+  </ItemGroup>
+</Project>
