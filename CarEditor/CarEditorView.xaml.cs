@@ -1,8 +1,11 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
@@ -21,6 +24,11 @@ record EngItem(long Id, string Media, string Name, double Pw, bool Rotary, bool 
 
 record MotorItem(long Id, string Media, string Name, double Pw, int Upg, double MaxScale)
 { public override string ToString() => $"{Naming.Friendly(Media)}{(string.IsNullOrWhiteSpace(Name) ? "" : "  (" + Name + ")")}   ~{Pw:0}   {(Upg > 0 ? $"▲{Upg} ×{MaxScale:0.##}" : "no upgrades")}"; }
+
+record PowerPartTarget(long Id, string Name, bool IsStock)
+{ public override string ToString() => $"{(IsStock ? "STOCK" : "SWAP")}  ·  {Name}  (ID {Id})"; }
+
+record TurboScaleTarget(string Table, long Id, long Level, double Scale0, double Scale1);
 
 record DbFieldSnapshot(string Table, string KeyColumn, object KeyValue, Dictionary<string, object> Values);
 record DbCreatedRow(string Table, string KeyColumn, object KeyValue);
@@ -81,15 +89,15 @@ static class Naming
         {
             1 => "V" + n,
             2 => "W" + n,
-            3 => "Inline " + n,
+            3 => "I" + n,
             5 => "Flat " + n,
             _ => n > 0 ? n + "-cyl" : "Other",
         };
     }
-    // sort key so the type dropdown reads Inline…, V…, Flat…, W…, Rotary — each by cylinder count
+    // sort key so the type dropdown reads I…, V…, Flat…, W…, Rotary — each by cylinder count
     public static (int, int) TypeSortKey(string t)
     {
-        int rank = t.StartsWith("Inline") ? 0 : t.StartsWith("V") ? 1 : t.StartsWith("Flat") ? 2 : t.StartsWith("W") ? 3 : t == "Rotary" ? 5 : 4;
+        int rank = t.StartsWith("I") ? 0 : t.StartsWith("V") ? 1 : t.StartsWith("Flat") ? 2 : t.StartsWith("W") ? 3 : t == "Rotary" ? 5 : 4;
         var m = System.Text.RegularExpressions.Regex.Match(t, @"\d+");
         return (rank, m.Success ? int.Parse(m.Value) : 0);
     }
@@ -100,17 +108,48 @@ public partial class CarEditorView : UserControl
     // ---- data ----
     SqliteConnection _conn;
     string _origPath, _workPath;
-    readonly HashSet<string> _motorMedia = new();   // media names that ship as electric motors
-    HashSet<long> _stockEngineCars = new();          // car Ids that currently have a stock combustion engine
-    HashSet<long> _stockMotorCars = new();           // car Ids that currently have a stock electric motor
+    readonly HashSet<string> _motorMedia = new();   // fallback for cars absent from the embedded stock reference
+    HashSet<long> _referenceCars = new();           // car Ids whose original powertrain is known from stock
+    HashSet<long> _originalEvCars = new();          // stock cars that originally had an electric motor
+    HashSet<long> _electricSpecCars = new();         // Data_Car's current EV configuration
     HashSet<long> _bodykitPresetCars = new();         // preset package points at a non-stock car-body row
+    readonly HashSet<long> _modifiedCars = new();     // cars that differ from the embedded clean stock reference
     Dictionary<long, long> _loadedBaseCosts = new(); // exact price snapshot for the Revert prices button
     readonly Dictionary<long, HandlingSnapshot> _handlingSnapshots = new();
-    bool _torqueLaddersDone;                          // motor torque-upgrade ladders built into this working DB yet?
     List<CarItem> _cars = new();
     List<EngItem> _engines = new();
     List<MotorItem> _motors = new();
     CarItem _car;
+    long? _powerTargetCarId;
+    bool _updatingPowerTargets;
+    string _stockReferencePath;
+    bool _stockReferenceAttached;
+    bool _batchRunning;
+    bool _updatingCarSelection;
+
+    const string StockReferenceResource = "FH6LocalCryptoTool.gamedbRC.stock.sqlite.gz";
+    static readonly string[] CarOrdinalTables =
+    {
+        "List_UpgradeAntiSwayFront", "List_UpgradeAntiSwayRear", "List_UpgradeBrakes",
+        "List_UpgradeCarBody", "List_UpgradeDrivetrain", "List_UpgradeEngine", "List_UpgradeMotor",
+        "List_UpgradeRearWing", "List_UpgradeRimSizeFront", "List_UpgradeRimSizeRear",
+        "List_UpgradeSpringDamper", "List_UpgradeTireCompound", "UpgradePresetPackages"
+    };
+    static readonly (string Table, string Column)[] BodyTables =
+    {
+        ("List_UpgradeCarBodyChassisStiffness", "CarbodyId"),
+        ("List_UpgradeCarBodyFrontBumper", "CarBodyID"), ("List_UpgradeCarBodyHood", "CarBodyID"),
+        ("List_UpgradeCarBodyRearBumper", "CarBodyID"), ("List_UpgradeCarBodySideSkirt", "CarBodyID"),
+        ("List_UpgradeCarBodyTireAspectRatioFront", "CarBodyId"), ("List_UpgradeCarBodyTireAspectRatioRear", "CarBodyId"),
+        ("List_UpgradeCarBodyTireWidthFront", "CarBodyId"), ("List_UpgradeCarBodyTireWidthRear", "CarBodyId"),
+        ("List_UpgradeCarBodyTrackSpacingFront", "CarBodyId"), ("List_UpgradeCarBodyTrackSpacingRear", "CarBodyId"),
+        ("List_UpgradeCarBodyWeight", "CarBodyId")
+    };
+    static readonly string[] EnginePowerTables =
+    {
+        "List_UpgradeEngineCamshaft", "List_UpgradeEngineTurboSingle",
+        "List_UpgradeEngineTurboTwin", "List_UpgradeEngineTurboQuad"
+    };
 
     // Real handling modifiers plus the matching garage-rating values. Geometry,
     // curb weight, drivetrain and tire dimensions stay specific to the target car.
@@ -184,6 +223,7 @@ public partial class CarEditorView : UserControl
     {
         InitializeComponent();
         LogBox.Document = new FlowDocument { PagePadding = new Thickness(0) };
+        PrepareEmbeddedStockReference();
         UpdateFilterLabel();
         Log("Ready. Load a database to begin.", "info");
     }
@@ -216,8 +256,16 @@ public partial class CarEditorView : UserControl
         EngSearchPh.Visibility = string.IsNullOrEmpty(EngSearch.Text) ? Visibility.Visible : Visibility.Collapsed;
         RenderEngines();
     }
-    void CarList_Changed(object s, SelectionChangedEventArgs e) => PickCar();
-    void Filt_Changed(object s, RoutedEventArgs e) { UpdateFilterLabel(); RenderCars(); }
+    void CarList_Changed(object s, SelectionChangedEventArgs e)
+    {
+        if (!_updatingCarSelection && !_batchRunning) PickCar();
+    }
+    void Filt_Changed(object s, RoutedEventArgs e)
+    {
+        UpdateFilterLabel();
+        if (FiltModified?.IsChecked == true && _stockReferenceAttached) RefreshModifiedCarsFromReference();
+        RenderCars();
+    }
     void UpdateFilterLabel()
     {
         if (FilterToggle == null) return;
@@ -227,7 +275,9 @@ public partial class CarEditorView : UserControl
         if (FiltConv?.IsChecked == true) on.Add("EV→ICE");
         if (FiltIceEv?.IsChecked == true) on.Add("ICE→EV");
         string types = on.Count == 4 ? "All types" : on.Count == 0 ? "None" : string.Join(", ", on);
-        FilterToggle.Content = types + (FiltBodykit?.IsChecked == true ? " · Bodykits" : "");
+        FilterToggle.Content = types +
+            (FiltBodykit?.IsChecked == true ? " · Bodykits" : "") +
+            (FiltModified?.IsChecked == true ? " · Modified" : "");
     }
     void MakeFilter_Changed(object s, SelectionChangedEventArgs e) => RenderEngines();
     void Filter_Changed(object s, RoutedEventArgs e) => RenderEngines();
@@ -237,13 +287,22 @@ public partial class CarEditorView : UserControl
     void Export_Click(object s, RoutedEventArgs e) => ExportDb();
     void SetStock_Click(object s, RoutedEventArgs e)
     {
-        if (MotorMode) { if (SelMot() is MotorItem m) ConvertToElectric(m.Id); else Log("pick a motor first", "warn"); }
-        else SetStockEngine();
+        if (MotorMode)
+        {
+            if (SelMot() is MotorItem m) RunForSelectedCars("set stock motor", () => ConvertToElectric(m.Id));
+            else Log("pick a motor first", "warn");
+        }
+        else RunForSelectedCars("set stock engine", SetStockEngine);
     }
     void AddSwap_Click(object s, RoutedEventArgs e)
     {
-        if (MotorMode) { if (SelMot() is MotorItem m) AddMotorOption(m.Id); else Log("pick a motor first", "warn"); }
-        else if (SelEng() is EngItem en) { AddEngineSwap(en.Id, false); RefreshCar(); }
+        if (MotorMode)
+        {
+            if (SelMot() is MotorItem m) RunForSelectedCars("add motor option", () => AddMotorOption(m.Id));
+            else Log("pick a motor first", "warn");
+        }
+        else if (SelEng() is EngItem en)
+            RunForSelectedCars("add engine swap", () => { AddEngineSwap(en.Id, false); RefreshCar(); });
     }
     void Mode_Changed(object s, SelectionChangedEventArgs e)
     {
@@ -261,16 +320,358 @@ public partial class CarEditorView : UserControl
         EngList.SelectedIndex = -1;
         RenderEngines();
     }
-    void AddMake_Click(object s, RoutedEventArgs e) => AddAllMake();
-    void AddAll_Click(object s, RoutedEventArgs e) => AddAllEngines();
-    void AddAllMotors_Click(object s, RoutedEventArgs e) => AddAllMotors();
-    void Apply_Click(object s, RoutedEventArgs e) => ApplyOptions();
+    void AddMake_Click(object s, RoutedEventArgs e) => RunForSelectedCars("add engines by make", AddAllMake);
+    void AddType_Click(object s, RoutedEventArgs e) => RunForSelectedCars("add engines by type", AddAllType);
+    void AddAll_Click(object s, RoutedEventArgs e) => RunForSelectedCars("add every engine", AddAllEngines);
+    void AddAllMotors_Click(object s, RoutedEventArgs e) => RunForSelectedCars("add every motor", AddAllMotors);
+    void Apply_Click(object s, RoutedEventArgs e) => RunForSelectedCars("apply checked options", ApplyOptions);
     void AddFe_Click(object s, RoutedEventArgs e) => SetFeCarsAutoshowAvailability(true);
     void RemoveFe_Click(object s, RoutedEventArgs e) => SetFeCarsAutoshowAvailability(false);
     void AllPriceOne_Click(object s, RoutedEventArgs e) => SetAllCarPricesToOne();
     void RevertPrices_Click(object s, RoutedEventArgs e) => RevertAllCarPrices();
-    void BestHandling_Click(object s, RoutedEventArgs e) => ApplyBestHandling();
-    void RevertHandling_Click(object s, RoutedEventArgs e) => RevertHandling();
+    void BestHandling_Click(object s, RoutedEventArgs e) => RunForSelectedCars("apply enhanced handling", ApplyBestHandling);
+    void RevertHandling_Click(object s, RoutedEventArgs e) => RunForSelectedCars("revert enhanced handling", RevertHandling);
+    void ApplyPower_Click(object s, RoutedEventArgs e) => ApplyPowerBuilder();
+    void RestoreCar_Click(object s, RoutedEventArgs e) => RestoreSelectedCar();
+
+    List<CarItem> SelectedCars()
+    {
+        var selected = CarList?.SelectedItems.Cast<CarItem>().ToList() ?? new List<CarItem>();
+        if (selected.Count == 0 && _car != null) selected.Add(_car);
+        return selected;
+    }
+
+    void RunForSelectedCars(string actionName, Action action, bool confirm = true)
+    {
+        var targets = SelectedCars();
+        if (targets.Count == 0) { Log("pick at least one car first", "warn"); return; }
+        if (targets.Count == 1) { action(); return; }
+        if (confirm && MessageBox.Show($"{actionName} for all {targets.Count} selected cars?\n\n" +
+                                       "The current controls are used as the batch template. This includes rim size, tire width, tire profile, track width, " +
+                                       "Drift/Rally suspension, drivetrain, tires, engines and selected power settings.\n\n" +
+                                       "Each preset click queues another rim, tire-width or profile step from every car's stock value. " +
+                                       "Each track click queues another 0.02 m extension from the widest existing value. Existing rows are preserved, " +
+                                       "and unchanged values are not added twice. " +
+                                       "Bodykit creation and bodykit targets are excluded.",
+                                       "Confirm batch edit", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        long[] targetIds = targets.Select(c => c.Id).ToArray();
+        long primaryId = _car?.Id ?? targetIds[0];
+        _batchRunning = true;
+        try
+        {
+            foreach (var target in targets)
+            {
+                _car = _cars.FirstOrDefault(c => c.Id == target.Id) ?? target;
+                action();
+            }
+        }
+        finally
+        {
+            _batchRunning = false;
+            _car = _cars.FirstOrDefault(c => c.Id == primaryId) ??
+                   _cars.FirstOrDefault(c => targetIds.Contains(c.Id));
+            RenderCars(targetIds, primaryId);
+            PickCar();
+        }
+        Log($"batch complete: {actionName} processed for {targets.Count} cars", "ok");
+    }
+
+    // ============================================================ embedded stock reference
+    void PrepareEmbeddedStockReference()
+    {
+        try
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "FH6LocalCryptoTool");
+            Directory.CreateDirectory(directory);
+            _stockReferencePath = Path.Combine(directory, $"gamedbRC.stock.v1.1.0.{Environment.ProcessId}.sqlite");
+
+            using Stream packed = Assembly.GetExecutingAssembly().GetManifestResourceStream(StockReferenceResource)
+                ?? throw new InvalidOperationException("the embedded stock database resource is missing");
+            using (var gzip = new GZipStream(packed, CompressionMode.Decompress))
+            using (var output = new FileStream(_stockReferencePath, FileMode.Create, FileAccess.Write, FileShare.Read))
+                gzip.CopyTo(output);
+
+            StockReferenceStatus.Text = "Embedded stock reference ready";
+        }
+        catch (Exception ex)
+        {
+            _stockReferencePath = null;
+            StockReferenceStatus.Text = "Embedded stock reference unavailable";
+            Log("stock reference could not be prepared: " + ex.Message, "warn");
+        }
+    }
+
+    void AttachStockReference()
+    {
+        _stockReferenceAttached = false;
+        RestoreCarBtn.IsEnabled = false;
+        if (string.IsNullOrWhiteSpace(_stockReferencePath) || !File.Exists(_stockReferencePath))
+            PrepareEmbeddedStockReference();
+        if (string.IsNullOrWhiteSpace(_stockReferencePath) || !File.Exists(_stockReferencePath))
+        {
+            StockReferenceStatus.Text = "Embedded stock reference unavailable (see activity log)";
+            return;
+        }
+
+        try
+        {
+            Exec("ATTACH DATABASE ? AS stockref", _stockReferencePath);
+            string integrity = Convert.ToString(Scalar("PRAGMA stockref.integrity_check"));
+            long cars = ScalarL("SELECT COUNT(*) FROM stockref.Data_Car") ?? 0;
+            if (!string.Equals(integrity, "ok", StringComparison.OrdinalIgnoreCase) || cars == 0)
+                throw new InvalidDataException("the embedded database did not pass its integrity check");
+            _stockReferenceAttached = true;
+            StockReferenceStatus.Text = $"Embedded stock reference · {cars} cars";
+        }
+        catch (Exception ex)
+        {
+            StockReferenceStatus.Text = "Embedded stock reference unavailable (see activity log)";
+            Log("stock reference could not be attached: " + ex.Message, "warn");
+        }
+    }
+
+    bool TableExists(string database, string table) =>
+        (ScalarL($"SELECT COUNT(*) FROM {database}.sqlite_master WHERE type='table' AND name=?", table) ?? 0) > 0;
+
+    List<Dictionary<string, object>> ReferenceDifferences(string table, params string[] ignoredColumns)
+    {
+        if (!TableExists("main", table) || !TableExists("stockref", table)) return new();
+        var referenceColumns = Query($"PRAGMA stockref.table_info(\"{table}\")")
+            .Select(r => (string)r["name"]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ignored = ignoredColumns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var columns = Query($"PRAGMA main.table_info(\"{table}\")")
+            .Select(r => (string)r["name"]).Where(c => referenceColumns.Contains(c) && !ignored.Contains(c)).ToArray();
+        if (columns.Length == 0) return new();
+        string selected = QuotedColumns(columns);
+        return Query($"SELECT * FROM (SELECT {selected} FROM main.\"{table}\" EXCEPT SELECT {selected} FROM stockref.\"{table}\") " +
+                     $"UNION ALL SELECT * FROM (SELECT {selected} FROM stockref.\"{table}\" EXCEPT SELECT {selected} FROM main.\"{table}\")");
+    }
+
+    void RefreshModifiedCarsFromReference()
+    {
+        if (_conn == null || !_stockReferenceAttached) return;
+        try
+        {
+            var changed = new HashSet<long>();
+            void AddColumn(IEnumerable<Dictionary<string, object>> rows, string column)
+            {
+                foreach (var row in rows)
+                    if (row.TryGetValue(column, out object value) && value != null)
+                        changed.Add(Convert.ToInt64(value));
+            }
+
+            // Price and Autoshow visibility are global/convenience settings, not
+            // car-editor modifications for the "Modified cars only" filter.
+            AddColumn(ReferenceDifferences("Data_Car", "BaseCost", "NotAvailableInAutoshow"), "Id");
+            foreach (string table in CarOrdinalTables)
+                AddColumn(ReferenceDifferences(table), "Ordinal");
+            AddColumn(ReferenceDifferences("List_SpringDamperPhysics"), "Ordinal");
+            AddColumn(ReferenceDifferences("List_AntiSwayPhysics"), "Ordinal");
+
+            var bodyOwners = new Dictionary<long, long>();
+            foreach (var row in Query(@"SELECT CarBodyID body,Ordinal car FROM main.List_UpgradeCarBody
+                                        UNION SELECT CarBodyID body,Ordinal car FROM stockref.List_UpgradeCarBody"))
+                bodyOwners[Convert.ToInt64(row["body"])] = Convert.ToInt64(row["car"]);
+            foreach (var (table, column) in BodyTables)
+                foreach (var row in ReferenceDifferences(table))
+                    if (row.TryGetValue(column, out object value) && value != null &&
+                        bodyOwners.TryGetValue(Convert.ToInt64(value), out long owner))
+                        changed.Add(owner);
+
+            var engineUsers = new Dictionary<long, HashSet<long>>();
+            foreach (var row in Query(@"SELECT EngineID part,Ordinal car FROM main.List_UpgradeEngine
+                                       UNION SELECT EngineID part,Ordinal car FROM stockref.List_UpgradeEngine"))
+            {
+                long part = Convert.ToInt64(row["part"]), car = Convert.ToInt64(row["car"]);
+                if (!engineUsers.TryGetValue(part, out var users)) engineUsers[part] = users = new();
+                users.Add(car);
+            }
+            foreach (string table in EnginePowerTables)
+                foreach (var row in ReferenceDifferences(table))
+                    if (row.TryGetValue("EngineID", out object value) && value != null &&
+                        engineUsers.TryGetValue(Convert.ToInt64(value), out var users))
+                        changed.UnionWith(users);
+            foreach (var row in ReferenceDifferences("Data_Engine"))
+                if (row.TryGetValue("EngineID", out object value) && value != null &&
+                    engineUsers.TryGetValue(Convert.ToInt64(value), out var users))
+                    changed.UnionWith(users);
+
+            var motorUsers = new Dictionary<long, HashSet<long>>();
+            foreach (var row in Query(@"SELECT MotorID part,Ordinal car FROM main.List_UpgradeMotor
+                                       UNION SELECT MotorID part,Ordinal car FROM stockref.List_UpgradeMotor"))
+            {
+                long part = Convert.ToInt64(row["part"]), car = Convert.ToInt64(row["car"]);
+                if (!motorUsers.TryGetValue(part, out var users)) motorUsers[part] = users = new();
+                users.Add(car);
+            }
+            foreach (var row in ReferenceDifferences("List_UpgradeMotorParts"))
+                if (row.TryGetValue("MotorID", out object value) && value != null &&
+                    motorUsers.TryGetValue(Convert.ToInt64(value), out var users))
+                    changed.UnionWith(users);
+            foreach (var row in ReferenceDifferences("Data_Motor"))
+                if (row.TryGetValue("MotorID", out object value) && value != null &&
+                    motorUsers.TryGetValue(Convert.ToInt64(value), out var users))
+                    changed.UnionWith(users);
+
+            var tireOwners = new Dictionary<long, long>();
+            foreach (var row in Query(@"SELECT Id part,Ordinal car FROM main.List_UpgradeTireCompound
+                                       UNION SELECT Id part,Ordinal car FROM stockref.List_UpgradeTireCompound"))
+                tireOwners[Convert.ToInt64(row["part"])] = Convert.ToInt64(row["car"]);
+            foreach (var row in ReferenceDifferences("List_UpgradeTireCompoundFictionModOverride"))
+                if (row.TryGetValue("PartId", out object value) && value != null &&
+                    tireOwners.TryGetValue(Convert.ToInt64(value), out long owner))
+                    changed.Add(owner);
+
+            var loadedCars = _cars.Select(c => c.Id).ToHashSet();
+            _modifiedCars.Clear();
+            _modifiedCars.UnionWith(changed.Where(loadedCars.Contains));
+            StockReferenceStatus.Text = $"Embedded stock reference · {_modifiedCars.Count} modified car{(_modifiedCars.Count == 1 ? "" : "s")}";
+        }
+        catch (Exception ex)
+        {
+            StockReferenceStatus.Text = "Embedded stock comparison failed (see activity log)";
+            FiltModified.IsChecked = false;
+            FiltModified.IsEnabled = false;
+            Log("stock comparison failed: " + ex.Message, "err");
+        }
+    }
+
+    HashSet<long> IdSet(string sql, params object[] values) =>
+        Query(sql, values).Where(r => r["v"] != null).Select(r => Convert.ToInt64(r["v"])).ToHashSet();
+
+    static object[] SqlValues(IEnumerable<long> ids) => ids.Cast<object>().ToArray();
+    static string SqlSlots(int count) => string.Join(",", Enumerable.Repeat("?", count));
+
+    void DeleteRowsByIds(string table, string column, IEnumerable<long> values)
+    {
+        long[] ids = values.Distinct().ToArray();
+        if (ids.Length > 0)
+            Exec($"DELETE FROM main.\"{table}\" WHERE \"{column}\" IN ({SqlSlots(ids.Length)})", SqlValues(ids));
+    }
+
+    void InsertReferenceRowsByIds(string table, string column, IEnumerable<long> values)
+    {
+        long[] ids = values.Distinct().ToArray();
+        if (ids.Length > 0)
+            Exec($"INSERT INTO main.\"{table}\" SELECT * FROM stockref.\"{table}\" " +
+                 $"WHERE \"{column}\" IN ({SqlSlots(ids.Length)})", SqlValues(ids));
+    }
+
+    void ReplaceReferenceRowsByIds(string table, string column, IEnumerable<long> values)
+    {
+        if (!TableExists("main", table) || !TableExists("stockref", table)) return;
+        long[] ids = values.Distinct().ToArray();
+        DeleteRowsByIds(table, column, ids);
+        InsertReferenceRowsByIds(table, column, ids);
+    }
+
+    bool ReferenceHasCar(long carId) => _stockReferenceAttached &&
+        (ScalarL("SELECT COUNT(*) FROM stockref.Data_Car WHERE Id=?", carId) ?? 0) > 0;
+
+    void RestoreSelectedCar()
+    {
+        if (_conn == null || _car == null) { Log("pick a car first", "warn"); return; }
+        long carId = _car.Id;
+        if (!_stockReferenceAttached)
+        {
+            Log("embedded stock reference is unavailable; reload the database to retry (see activity log)", "warn");
+            return;
+        }
+        if (!ReferenceHasCar(carId))
+        {
+            Log("this car is not present in the embedded stock database", "warn");
+            return;
+        }
+
+        var answer = MessageBox.Show(
+            $"Restore {Naming.Friendly(_car.Media)} from the embedded clean stock database?\n\n" +
+            "This replaces the car's editable rows. Engine and motor upgrade data is shared by ID, " +
+            "so restoring those rows can also affect other cars using the same engine or motor.",
+            "Restore selected car", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+
+        RestoreCarFromReference(carId, _car.Media);
+    }
+
+    void RestoreCarFromReference(long carId, string media)
+    {
+        try
+        {
+            var bodyIds = IdSet("SELECT CarBodyID v FROM main.List_UpgradeCarBody WHERE Ordinal=?", carId);
+            bodyIds.UnionWith(IdSet("SELECT CarBodyID v FROM stockref.List_UpgradeCarBody WHERE Ordinal=?", carId));
+            bodyIds.Remove(0);
+
+            var springIds = IdSet(@"SELECT FrontSpringDamperPhysicsID v FROM main.List_UpgradeSpringDamper WHERE Ordinal=?
+                                    UNION SELECT RearSpringDamperPhysicsID v FROM main.List_UpgradeSpringDamper WHERE Ordinal=?
+                                    UNION SELECT FrontSpringDamperPhysicsID v FROM stockref.List_UpgradeSpringDamper WHERE Ordinal=?
+                                    UNION SELECT RearSpringDamperPhysicsID v FROM stockref.List_UpgradeSpringDamper WHERE Ordinal=?",
+                                  carId, carId, carId, carId);
+            springIds.Remove(0);
+            var antiSwayIds = IdSet(@"SELECT AntiSwayPhysicsID v FROM main.List_UpgradeAntiSwayFront WHERE Ordinal=?
+                                     UNION SELECT AntiSwayPhysicsID v FROM main.List_UpgradeAntiSwayRear WHERE Ordinal=?
+                                     UNION SELECT AntiSwayPhysicsID v FROM stockref.List_UpgradeAntiSwayFront WHERE Ordinal=?
+                                     UNION SELECT AntiSwayPhysicsID v FROM stockref.List_UpgradeAntiSwayRear WHERE Ordinal=?",
+                                   carId, carId, carId, carId);
+            antiSwayIds.Remove(0);
+            var tireIds = IdSet("SELECT Id v FROM main.List_UpgradeTireCompound WHERE Ordinal=?", carId);
+            tireIds.UnionWith(IdSet("SELECT Id v FROM stockref.List_UpgradeTireCompound WHERE Ordinal=?", carId));
+            tireIds.Remove(0);
+            // Include swap-option links as well as the stock link. A shared engine or motor
+            // change marks every linked car modified, so Restore must also work when the
+            // selected car sees the changed part as an option rather than as its stock unit.
+            var engineIds = IdSet("SELECT EngineID v FROM main.List_UpgradeEngine WHERE Ordinal=?", carId);
+            engineIds.UnionWith(IdSet("SELECT EngineID v FROM stockref.List_UpgradeEngine WHERE Ordinal=?", carId));
+            engineIds.RemoveWhere(id => (ScalarL("SELECT COUNT(*) FROM stockref.Data_Engine WHERE EngineID=?", id) ?? 0) == 0);
+            var motorIds = IdSet("SELECT MotorID v FROM main.List_UpgradeMotor WHERE Ordinal=?", carId);
+            motorIds.UnionWith(IdSet("SELECT MotorID v FROM stockref.List_UpgradeMotor WHERE Ordinal=?", carId));
+            motorIds.RemoveWhere(id => (ScalarL("SELECT COUNT(*) FROM stockref.Data_Motor WHERE MotorID=?", id) ?? 0) == 0);
+
+            Exec("SAVEPOINT restore_car");
+
+            foreach (var (table, column) in BodyTables)
+                DeleteRowsByIds(table, column, bodyIds);
+            DeleteRowsByIds("List_UpgradeTireCompoundFictionModOverride", "PartId", tireIds);
+            DeleteRowsByIds("List_SpringDamperPhysics", "SpringDamperPhysicsID", springIds);
+            DeleteRowsByIds("List_AntiSwayPhysics", "AntiSwayPhysicsID", antiSwayIds);
+            foreach (string table in CarOrdinalTables)
+                Exec($"DELETE FROM main.\"{table}\" WHERE Ordinal=?", carId);
+            Exec("DELETE FROM main.Data_Car WHERE Id=?", carId);
+
+            Exec("INSERT INTO main.Data_Car SELECT * FROM stockref.Data_Car WHERE Id=?", carId);
+            foreach (string table in CarOrdinalTables)
+                Exec($"INSERT INTO main.\"{table}\" SELECT * FROM stockref.\"{table}\" WHERE Ordinal=?", carId);
+            InsertReferenceRowsByIds("List_SpringDamperPhysics", "SpringDamperPhysicsID", springIds);
+            InsertReferenceRowsByIds("List_AntiSwayPhysics", "AntiSwayPhysicsID", antiSwayIds);
+            foreach (var (table, column) in BodyTables)
+                InsertReferenceRowsByIds(table, column, bodyIds);
+            InsertReferenceRowsByIds("List_UpgradeTireCompoundFictionModOverride", "PartId", tireIds);
+            foreach (string table in EnginePowerTables)
+                ReplaceReferenceRowsByIds(table, "EngineID", engineIds);
+            ReplaceReferenceRowsByIds("List_UpgradeMotorParts", "MotorID", motorIds);
+
+            Exec("RELEASE restore_car");
+
+            _handlingSnapshots.Remove(carId);
+            var loadedBaseCosts = _loadedBaseCosts;
+            IndexDb();
+            _loadedBaseCosts = loadedBaseCosts;
+            RefreshModifiedCarsFromReference();
+            _car = null;
+            CarInfo.Text = "";
+            EngList.ItemsSource = null;
+            ClearPowerBuilder();
+            AddBodyKitBtn.IsEnabled = RestoreCarBtn.IsEnabled = ApplyPowerBtn.IsEnabled = false;
+            RenderCars();
+            Log($"restored {media} from the embedded stock database", "ok");
+        }
+        catch (Exception ex)
+        {
+            try { Exec("ROLLBACK TO restore_car"); Exec("RELEASE restore_car"); } catch { }
+            Log("car restore failed: " + ex.Message, "err");
+        }
+    }
 
     // ============================================================ DB open / export
     void LoadDb()
@@ -291,12 +692,30 @@ public partial class CarEditorView : UserControl
     }
     void Open()
     {
-        _conn = new SqliteConnection($"Data Source={_workPath}");
+        // This editor attaches the embedded reference as `stockref`. A pooled SQLite
+        // handle keeps ATTACH state across Close/Dispose, so a later Open could
+        // inherit that handle and fail with "database stockref is already in use".
+        _conn = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = _workPath,
+            Pooling = false
+        }.ToString());
         _conn.Open();
         Exec("PRAGMA foreign_keys=OFF");
-        _torqueLaddersDone = false;
+        _car = null;
+        _modifiedCars.Clear();
+        ClearPowerBuilder();
+        AddBodyKitBtn.IsEnabled = false;
+        RestoreCarBtn.IsEnabled = false;
+        ApplyPowerBtn.IsEnabled = false;
+        CarInfo.Text = "";
+        EngList.ItemsSource = null;
         _handlingSnapshots.Clear();
+        AttachStockReference();
         IndexDb();
+        FiltModified.IsEnabled = _stockReferenceAttached;
+        if (_stockReferenceAttached) RefreshModifiedCarsFromReference();
+        else FiltModified.IsChecked = false;
         ReloadBtn.IsEnabled = ExportBtn.IsEnabled = AddFeBtn.IsEnabled = RemoveFeBtn.IsEnabled =
             AllPriceOneBtn.IsEnabled = RevertPricesBtn.IsEnabled =
             BestHandlingBtn.IsEnabled = RevertHandlingBtn.IsEnabled = true;
@@ -304,7 +723,7 @@ public partial class CarEditorView : UserControl
         Status.Text = $"{Path.GetFileName(_origPath)}   ·   {_cars.Count} cars   ·   {_engines.Count} engines";
         Log($"cars: {_cars.Count} · engines: {_engines.Count}", "info");
         int conv = _cars.Count(c => c.Type is "EV→ICE" or "ICE→EV");
-        if (conv > 0) Log($"detected {conv} already-converted car{(conv == 1 ? "" : "s")} (EV→ICE / ICE→EV)", "info");
+        if (conv > 0) Log($"detected {conv} converted car{(conv == 1 ? "" : "s")} (EV→ICE / ICE→EV)", "info");
     }
     void ReloadOriginal()
     {
@@ -359,11 +778,15 @@ public partial class CarEditorView : UserControl
     {
         _motorMedia.Clear();
         foreach (var r in Query("SELECT MediaName FROM Data_Motor")) _motorMedia.Add((string)r["MediaName"]);
-        // cars that currently carry a stock combustion engine (a native EV has none until converted)
-        _stockEngineCars = Query("SELECT DISTINCT Ordinal FROM List_UpgradeEngine WHERE IsStock=1")
-            .Select(r => Convert.ToInt64(r["Ordinal"])).ToHashSet();
-        _stockMotorCars = Query("SELECT DISTINCT Ordinal FROM List_UpgradeMotor WHERE IsStock=1")
-            .Select(r => Convert.ToInt64(r["Ordinal"])).ToHashSet();
+        _referenceCars = _stockReferenceAttached
+            ? Query("SELECT Id FROM stockref.Data_Car").Select(r => Convert.ToInt64(r["Id"])).ToHashSet()
+            : new();
+        _originalEvCars = _stockReferenceAttached
+            ? Query("SELECT DISTINCT Ordinal FROM stockref.List_UpgradeMotor WHERE IsStock=1")
+                .Select(r => Convert.ToInt64(r["Ordinal"])).ToHashSet()
+            : new();
+        _electricSpecCars = Query("SELECT Id FROM Data_Car WHERE EngineConfigID=6 AND Displacement=0")
+            .Select(r => Convert.ToInt64(r["Id"])).ToHashSet();
         _bodykitPresetCars = Query(@"SELECT DISTINCT p.Ordinal
                                     FROM UpgradePresetPackages p
                                     JOIN List_UpgradeCarBody b ON b.Id=p.CarBody
@@ -393,47 +816,106 @@ public partial class CarEditorView : UserControl
         var types = _engines.Select(e => e.EngType).Distinct().OrderBy(Naming.TypeSortKey).ToList();
         TypeFilter.Items.Clear(); TypeFilter.Items.Add("All types"); foreach (var t in types) TypeFilter.Items.Add(t); TypeFilter.SelectedIndex = 0;
     }
-    // Detect current powertrain state, keeping the car's origin in mind.
-    //   ICE = native combustion · EV = native electric · EV→ICE = was EV, now combustion · ICE→EV = was ICE, now electric
+    // Data_Car's electric configuration determines the current powertrain. Upgrade
+    // menus can be stale or contradictory in an imported DB; they are not the type.
     string TypeFor(long id, string media)
     {
-        bool eng = _stockEngineCars.Contains(id);   // has a stock combustion engine
-        bool mot = _stockMotorCars.Contains(id);    // has a stock electric motor
-        bool originEV = _motorMedia.Contains(media);
-        if (eng) return originEV ? "EV→ICE" : "ICE";
-        if (mot) return originEV ? "EV" : "ICE→EV";
-        return originEV ? "EV" : "ICE";
+        bool originEV = _referenceCars.Contains(id) ? _originalEvCars.Contains(id) : _motorMedia.Contains(media);
+        bool currentEV = _electricSpecCars.Contains(id);
+        return currentEV ? (originEV ? "EV" : "ICE→EV") : (originEV ? "EV→ICE" : "ICE");
     }
 
-    void RenderCars()
+    void RenderCars(IEnumerable<long> restoreSelection = null, long? primaryId = null)
     {
-        if (_cars == null || CarList == null) return;
+        if (_cars == null || CarList == null || _batchRunning) return;
+        var selectedIds = (restoreSelection ?? CarList.SelectedItems.Cast<CarItem>().Select(c => c.Id)).ToHashSet();
         var term = (CarSearch.Text ?? "").ToLower();
         bool ev = FiltEV?.IsChecked == true, ice = FiltICE?.IsChecked == true,
              conv = FiltConv?.IsChecked == true, iceev = FiltIceEv?.IsChecked == true,
-             bodykit = FiltBodykit?.IsChecked == true;
-        CarList.ItemsSource = _cars
+             bodykit = FiltBodykit?.IsChecked == true, modified = FiltModified?.IsChecked == true;
+        var visibleCars = _cars
             .Where(c => (!bodykit || _bodykitPresetCars.Contains(c.Id)) &&
+                        (!modified || _modifiedCars.Contains(c.Id)) &&
                         (c.Media + " " + Naming.Friendly(c.Media)).ToLower().Contains(term) && (
                 c.Type == "ICE"    ? ice   :
                 c.Type == "EV→ICE" ? conv  :
                 c.Type == "ICE→EV" ? iceev :
                                      ev))     // "EV"
-            .Take(500).ToList();
+            .ToList();
+        _updatingCarSelection = true;
+        try
+        {
+            CarList.ItemsSource = visibleCars;
+            foreach (var car in visibleCars.Where(c => selectedIds.Contains(c.Id)))
+                CarList.SelectedItems.Add(car);
+            if (primaryId.HasValue)
+            {
+                var primary = visibleCars.FirstOrDefault(c => c.Id == primaryId.Value);
+                if (primary != null) CarList.SelectedItem = primary;
+            }
+        }
+        finally { _updatingCarSelection = false; }
     }
     void PickCar()
     {
-        if (CarList.SelectedItem is not CarItem c) return;
+        var selected = CarList.SelectedItems.Cast<CarItem>().ToList();
+        if (selected.Count == 0) return;
+        var c = CarList.SelectedItem as CarItem ?? selected[^1];
         _car = c;
-        ShowCarInfo(); RenderEngines(); PopulateFitmentFields();
-        Log("selected " + c.Media, "info");
+        bool batch = selected.Count > 1;
+        AddBodyKitBtn.IsEnabled = !batch;
+        BodyTargets.IsEnabled = !batch;
+        ShowSingleCarFitmentAddButtons(!batch);
+        bool canRestore = !batch && ReferenceHasCar(c.Id);
+        RestoreCarBtn.IsEnabled = canRestore;
+        RestoreCarBtn.ToolTip = batch
+            ? "Restore is disabled in batch mode because restoring a whole car also replaces its bodykit rows."
+            : canRestore
+            ? $"Replace {(batch ? "these cars'" : "this car's")} editable rows with embedded stock rows. Shared engine and motor upgrades may affect other cars using the same IDs."
+            : _stockReferenceAttached
+                ? "This car is not in the embedded stock database, so there are no stock rows to restore."
+                : "The embedded stock reference is unavailable. Check the activity log, then reload the database to retry.";
+        ShowCarInfo(); RenderEngines(); PopulateFitmentFields(); PopulatePowerBuilder();
+        ApplyOptionsBtn.Content = batch ? $"⚙  APPLY changes to {selected.Count} cars" : "⚙  APPLY changes to this car";
+        if (batch)
+        {
+            PrepareBatchFitmentTemplate();
+            PopulateBatchPowerBuilder(selected);
+            bool[] autoshow = selected.Select(x => (ScalarL("SELECT NotAvailableInAutoshow FROM Data_Car WHERE Id=?", x.Id) ?? 1) == 0).ToArray();
+            OptAutoshow.IsThreeState = true;
+            OptAutoshow.IsChecked = autoshow.All(x => x) ? true : autoshow.All(x => !x) ? false : null;
+            CarInfo.Text = $"BATCH MODE    {selected.Count} cars selected\n" +
+                           $"Primary       {Naming.Friendly(c.Media)}\n\n" +
+                           "The controls use the primary car as a template.\n" +
+                           "Click fitment buttons repeatedly to queue levels:\n" +
+                           "rims ±1 in · widths ±10 mm · profiles ±2 per click.\n" +
+                           "Track adds +0.02 m per click from each widest row.\n" +
+                           "Right-click a button to remove its last queued level.\n" +
+                           "Queued fitment is written lowest to highest.\n" +
+                           "Existing choices are skipped; unchanged Apply adds nothing.\n" +
+                           "Batch: rims, tire width/profile, track width,\n" +
+                           "Drift/Rally suspension, drivetrain and tires.\n" +
+                           "Fitment applies to each car's stock body.\n" +
+                           "Bodykit creation/targets are disabled.";
+            Log($"batch selection: {selected.Count} cars (primary: {c.Media})", "info");
+        }
+        else
+        {
+            OptAutoshow.IsThreeState = false;
+            ApplyPowerBtn.ToolTip = null;
+            Log("selected " + c.Media, "info");
+        }
     }
     long BodyId(long carId) => ScalarL("SELECT CarBodyID FROM List_UpgradeCarBody WHERE Ordinal=? AND IsStock=1", carId) ?? carId * 1000;
 
-    void RefreshCar() { ShowCarInfo(); RenderEngines(); }
+    void RefreshCar()
+    {
+        if (_batchRunning) return;
+        ShowCarInfo(); RenderEngines(); PopulatePowerBuilder();
+    }
     void ShowCarInfo()
     {
-        if (_car == null) return;
+        if (_car == null || _batchRunning) return;
         var c = _car;
         var engN = ScalarL("SELECT COUNT(*) FROM List_UpgradeEngine WHERE Ordinal=?", c.Id) ?? 0;
         var stock = Query("SELECT de.EngineName n FROM List_UpgradeEngine le LEFT JOIN Data_Engine de ON de.EngineID=le.EngineID WHERE le.Ordinal=? AND le.IsStock=1", c.Id);
@@ -457,18 +939,418 @@ public partial class CarEditorView : UserControl
         // had an engine set as stock this session — while staying on for native EVs and ICE→EV swaps.
         bool hasMotor = (ScalarL("SELECT COUNT(*) FROM List_UpgradeMotor WHERE Ordinal=? AND IsStock=1", c.Id) ?? 0) > 0;
         bool hasEngine = (ScalarL("SELECT COUNT(*) FROM List_UpgradeEngine WHERE Ordinal=? AND IsStock=1", c.Id) ?? 0) > 0;
-        bool isEv = hasMotor && !hasEngine;
-        OptManual.IsEnabled = isEv;
-        if (!isEv) OptManual.IsChecked = false;
+        bool isEv = _electricSpecCars.Contains(c.Id);
+        bool canUseManual = isEv && hasMotor && !hasEngine;
+        OptManual.IsEnabled = canUseManual;
+        if (!canUseManual) OptManual.IsChecked = false;
+    }
+
+    void MarkModified(params long[] carIds)
+    {
+        foreach (long carId in carIds) _modifiedCars.Add(carId);
+    }
+
+    void RefreshModifiedAfterExcludedEdit()
+    {
+        if (_stockReferenceAttached) RefreshModifiedCarsFromReference();
+        if (FiltModified?.IsChecked == true) RenderCars();
+    }
+
+    long[] CarsUsingEngine(long engineId) =>
+        Query(@"SELECT DISTINCT e.Ordinal FROM List_UpgradeEngine e
+                JOIN Data_Car c ON c.Id=e.Ordinal WHERE e.EngineID=?", engineId)
+            .Select(r => Convert.ToInt64(r["Ordinal"])).ToArray();
+
+    long[] CarsUsingMotor(long motorId) =>
+        Query(@"SELECT DISTINCT m.Ordinal FROM List_UpgradeMotor m
+                JOIN Data_Car c ON c.Id=m.Ordinal WHERE m.MotorID=?", motorId)
+            .Select(r => Convert.ToInt64(r["Ordinal"])).ToArray();
+
+    static string PowerText(object value, string format) => value == null
+        ? "" : Convert.ToDouble(value).ToString(format, CultureInfo.InvariantCulture);
+
+    void SetPowerField(CheckBox option, TextBox box, bool enabled, string text)
+    {
+        option.IsChecked = false;
+        option.IsEnabled = enabled;
+        box.IsEnabled = enabled;
+        box.Text = enabled ? text : "";
+    }
+
+    void ClearPowerBuilder()
+    {
+        _powerTargetCarId = null;
+        _updatingPowerTargets = true;
+        try
+        {
+            PowerEngineTarget.ItemsSource = null;
+            PowerMotorTarget.ItemsSource = null;
+            PowerEngineTarget.IsEnabled = PowerMotorTarget.IsEnabled = false;
+        }
+        finally { _updatingPowerTargets = false; }
+        SetPowerField(OptPowerBoost, PowerBoostScale, false, "");
+        SetPowerField(OptPowerRedline, PowerRedline, false, "");
+        SetPowerField(OptPowerWeight, PowerWeightDistribution, false, "");
+        SetPowerField(OptPowerEvTorque, PowerEvTorque, false, "");
+        ApplyPowerBtn.IsEnabled = false;
+    }
+
+    void PowerTarget_Changed(object s, SelectionChangedEventArgs e)
+    {
+        if (!_updatingPowerTargets && _conn != null && _car != null &&
+            PowerEngineTarget != null && PowerMotorTarget != null)
+            PopulatePowerFields(s == PowerEngineTarget, s == PowerMotorTarget, false);
+    }
+
+    long? SelectedPowerEngineId() => (PowerEngineTarget.SelectedItem as PowerPartTarget)?.Id;
+    long? SelectedPowerMotorId() => (PowerMotorTarget.SelectedItem as PowerPartTarget)?.Id;
+
+    void PopulatePowerBuilder()
+    {
+        if (_conn == null || _car == null || _batchRunning) return;
+        long carId = _car.Id;
+        bool sameCar = _powerTargetCarId == carId;
+        long? previousEngine = sameCar ? SelectedPowerEngineId() : null;
+        long? previousMotor = sameCar ? SelectedPowerMotorId() : null;
+
+        var engineTargets = Query(@"SELECT e.EngineID id, MAX(e.IsStock) stock, MIN(e.Level) firstLevel, de.EngineName name
+                                    FROM List_UpgradeEngine e JOIN Data_Engine de ON de.EngineID=e.EngineID
+                                    WHERE e.Ordinal=? GROUP BY e.EngineID ORDER BY stock DESC,firstLevel,e.EngineID", carId)
+            .Select(r => new PowerPartTarget(Convert.ToInt64(r["id"]),
+                string.IsNullOrWhiteSpace(r["name"] as string) ? $"Engine {r["id"]}" : (string)r["name"],
+                Convert.ToInt64(r["stock"] ?? 0L) != 0)).ToList();
+        var motorTargets = Query(@"SELECT m.MotorID id, MAX(m.IsStock) stock, MIN(m.Level) firstLevel, dm.MediaName media, dm.MotorName name
+                                   FROM List_UpgradeMotor m JOIN Data_Motor dm ON dm.MotorID=m.MotorID
+                                   WHERE m.Ordinal=? GROUP BY m.MotorID ORDER BY stock DESC,firstLevel,m.MotorID", carId)
+            .Select(r => new PowerPartTarget(Convert.ToInt64(r["id"]),
+                string.IsNullOrWhiteSpace(r["name"] as string) ? Naming.Friendly(r["media"] as string) : (string)r["name"],
+                Convert.ToInt64(r["stock"] ?? 0L) != 0)).ToList();
+
+        _updatingPowerTargets = true;
+        try
+        {
+            PowerEngineTarget.ItemsSource = engineTargets;
+            PowerEngineTarget.IsEnabled = engineTargets.Count > 0;
+            PowerEngineTarget.SelectedItem = engineTargets.FirstOrDefault(t => t.Id == previousEngine)
+                ?? engineTargets.FirstOrDefault(t => t.IsStock) ?? engineTargets.FirstOrDefault();
+            PowerMotorTarget.ItemsSource = motorTargets;
+            PowerMotorTarget.IsEnabled = motorTargets.Count > 0;
+            PowerMotorTarget.SelectedItem = motorTargets.FirstOrDefault(t => t.Id == previousMotor)
+                ?? motorTargets.FirstOrDefault(t => t.IsStock) ?? motorTargets.FirstOrDefault();
+            _powerTargetCarId = carId;
+        }
+        finally { _updatingPowerTargets = false; }
+        PopulatePowerFields();
+    }
+
+    void PopulateBatchPowerBuilder(IReadOnlyCollection<CarItem> cars)
+    {
+        long[] engineIds = cars.Select(c => ScalarL("SELECT EngineID FROM List_UpgradeEngine WHERE Ordinal=? AND IsStock=1 LIMIT 1", c.Id))
+            .Where(id => id.HasValue).Select(id => id.Value).Distinct().ToArray();
+        long[] motorIds = cars.Select(c => ScalarL("SELECT MotorID FROM List_UpgradeMotor WHERE Ordinal=? AND IsStock=1 LIMIT 1", c.Id))
+            .Where(id => id.HasValue).Select(id => id.Value).Distinct().ToArray();
+        bool boost = engineIds.Any(id => new[] { "List_UpgradeEngineTurboSingle", "List_UpgradeEngineTurboTwin", "List_UpgradeEngineTurboQuad" }
+            .Any(table => (ScalarL($"SELECT COUNT(*) FROM {table} WHERE EngineID=?", id) ?? 0) > 0));
+        bool redline = engineIds.Any(id => (ScalarL("SELECT COUNT(*) FROM List_UpgradeEngineCamshaft WHERE EngineID=?", id) ?? 0) > 0);
+        bool weight = cars.Any(c => (ScalarL(@"SELECT COUNT(*) FROM List_UpgradeCarBodyWeight
+                                                   WHERE Level=2 AND CarBodyId IN
+                                                     (SELECT CarBodyID FROM List_UpgradeCarBody WHERE Ordinal=?)", c.Id) ?? 0) > 0);
+        bool ev = motorIds.Any(id => (ScalarL("SELECT COUNT(*) FROM List_UpgradeMotorParts WHERE MotorID=? AND IsStock=0", id) ?? 0) > 0);
+
+        _updatingPowerTargets = true;
+        try
+        {
+            PowerEngineTarget.ItemsSource = engineIds.Length == 0 ? null :
+                new[] { new PowerPartTarget(-1, $"BATCH · {engineIds.Length} stock engine(s)", true) };
+            PowerEngineTarget.SelectedIndex = engineIds.Length == 0 ? -1 : 0;
+            PowerEngineTarget.IsEnabled = false;
+            PowerMotorTarget.ItemsSource = motorIds.Length == 0 ? null :
+                new[] { new PowerPartTarget(-1, $"BATCH · {motorIds.Length} stock motor(s)", true) };
+            PowerMotorTarget.SelectedIndex = motorIds.Length == 0 ? -1 : 0;
+            PowerMotorTarget.IsEnabled = false;
+        }
+        finally { _updatingPowerTargets = false; }
+        SetPowerField(OptPowerBoost, PowerBoostScale, boost, "");
+        SetPowerField(OptPowerRedline, PowerRedline, redline, "");
+        SetPowerField(OptPowerWeight, PowerWeightDistribution, weight, "");
+        SetPowerField(OptPowerEvTorque, PowerEvTorque, ev, "");
+        ApplyPowerBtn.IsEnabled = boost || redline || weight || ev;
+        ApplyPowerBtn.ToolTip = "Batch mode applies engine and motor settings to each selected car's stock unit. Shared IDs can also affect unselected cars.";
+    }
+
+    void PopulatePowerFields(bool engine = true, bool motor = true, bool weightField = true)
+    {
+        if (_conn == null || _car == null) return;
+        long carId = _car.Id;
+        long? engineId = SelectedPowerEngineId();
+        long? motorId = SelectedPowerMotorId();
+
+        object boost = null, redline = null, evScale = null;
+        if (engineId.HasValue)
+        {
+            boost = HighestTurboScaleTarget(engineId.Value)?.Scale0;
+            redline = Scalar("SELECT RedlineRPM FROM List_UpgradeEngineCamshaft WHERE EngineID=? ORDER BY Level DESC,Id DESC LIMIT 1", engineId.Value);
+        }
+        if (motorId.HasValue)
+            evScale = Scalar("SELECT MAX(TorqueScale) FROM List_UpgradeMotorParts WHERE MotorID=? AND IsStock=0", motorId.Value);
+
+        object weight = Scalar(@"SELECT CMBackFront FROM List_UpgradeCarBodyWeight
+                                 WHERE Level=2 AND CarBodyId IN
+                                   (SELECT CarBodyID FROM List_UpgradeCarBody WHERE Ordinal=?)
+                                 ORDER BY CarBodyId,Id LIMIT 1", carId);
+
+        if (engine)
+        {
+            SetPowerField(OptPowerBoost, PowerBoostScale, boost != null, PowerText(boost, "0.####"));
+            SetPowerField(OptPowerRedline, PowerRedline, redline != null, PowerText(redline, "0"));
+        }
+        if (weightField)
+            SetPowerField(OptPowerWeight, PowerWeightDistribution, weight != null, PowerText(weight, "0.####"));
+        if (motor)
+            SetPowerField(OptPowerEvTorque, PowerEvTorque, evScale != null, PowerText(evScale, "0.####"));
+        ApplyPowerBtn.IsEnabled = OptPowerBoost.IsEnabled || OptPowerRedline.IsEnabled ||
+                                  OptPowerWeight.IsEnabled || OptPowerEvTorque.IsEnabled;
+    }
+
+    TurboScaleTarget HighestTurboScaleTarget(long engineId)
+    {
+        TurboScaleTarget best = null;
+        foreach (string table in new[] { "List_UpgradeEngineTurboSingle", "List_UpgradeEngineTurboTwin", "List_UpgradeEngineTurboQuad" })
+        {
+            var row = Query($@"SELECT Id,Level,TorqueDropOffScale0 s0,TorqueDropOffScale1 s1
+                                FROM {table} WHERE EngineID=? ORDER BY Level DESC,Id DESC LIMIT 1", engineId).FirstOrDefault();
+            if (row == null) continue;
+            var candidate = new TurboScaleTarget(table, Convert.ToInt64(row["Id"]), Convert.ToInt64(row["Level"]),
+                Convert.ToDouble(row["s0"]), Convert.ToDouble(row["s1"]));
+            if (best == null || candidate.Level > best.Level || candidate.Level == best.Level && candidate.Id > best.Id)
+                best = candidate;
+        }
+        return best;
+    }
+
+    TurboScaleTarget ApplyHighestTurboScale(long engineId, double requestedScale0)
+    {
+        var target = HighestTurboScaleTarget(engineId);
+        if (target == null) return null;
+        double ratio = Math.Abs(target.Scale0) > 0.000000001 ? target.Scale1 / target.Scale0 : 1d;
+        double requestedScale1 = Math.Round(requestedScale0 * ratio, 6);
+        Exec($"UPDATE {target.Table} SET TorqueDropOffScale0=?,TorqueDropOffScale1=? WHERE Id=? AND EngineID=?",
+            requestedScale0, requestedScale1, target.Id, engineId);
+        return target with { Scale0 = requestedScale0, Scale1 = requestedScale1 };
+    }
+
+    bool TryPowerNumber(TextBox box, string label, double minimum, double maximum, out double value)
+    {
+        string text = box.Text.Trim().TrimEnd('%');
+        bool valid = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) ||
+                     double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value);
+        if (valid && value >= minimum && value <= maximum) return true;
+        Log($"{label} must be a number from {minimum:0.##} to {maximum:0.##}", "warn");
+        value = 0;
+        return false;
+    }
+
+    void ApplyPowerBuilder()
+    {
+        if (_conn == null || _car == null) { Log("pick a car first", "warn"); return; }
+        var batchCars = SelectedCars();
+        if (batchCars.Count > 1) { ApplyBatchPowerBuilder(batchCars); return; }
+        bool doBoost = OptPowerBoost.IsChecked == true;
+        bool doRedline = OptPowerRedline.IsChecked == true;
+        bool doWeight = OptPowerWeight.IsChecked == true;
+        bool doEv = OptPowerEvTorque.IsChecked == true;
+        if (!doBoost && !doRedline && !doWeight && !doEv)
+        { Log("select at least one power-builder setting", "warn"); return; }
+
+        double boostScale = 0, redlineRpm = 0, weightDistribution = 0, evMaxScale = 0;
+        if (doBoost && !TryPowerNumber(PowerBoostScale, "boost scale", 0.01, 100, out boostScale)) return;
+        if (doRedline && !TryPowerNumber(PowerRedline, "redline", 500, 30000, out redlineRpm)) return;
+        if (doWeight)
+        {
+            if (!TryPowerNumber(PowerWeightDistribution, "weight distribution", 0, 100, out weightDistribution)) return;
+            if (weightDistribution > 1) weightDistribution /= 100d;
+            if (weightDistribution < 0 || weightDistribution > 1)
+            { Log("weight distribution must be between 0.0 and 1.0, or 0% and 100%", "warn"); return; }
+        }
+        if (doEv && !TryPowerNumber(PowerEvTorque, "EV torque scale", 0.01, 100, out evMaxScale)) return;
+
+        long carId = _car.Id;
+        long? engineId = SelectedPowerEngineId();
+        long? motorId = SelectedPowerMotorId();
+        if ((doBoost || doRedline) && (!engineId.HasValue ||
+            (ScalarL("SELECT COUNT(*) FROM List_UpgradeEngine WHERE Ordinal=? AND EngineID=?", carId, engineId.Value) ?? 0) == 0))
+        { Log("choose an engine currently linked to this car", "warn"); return; }
+        if (doEv && (!motorId.HasValue ||
+            (ScalarL("SELECT COUNT(*) FROM List_UpgradeMotor WHERE Ordinal=? AND MotorID=?", carId, motorId.Value) ?? 0) == 0))
+        { Log("choose a motor currently linked to this car", "warn"); return; }
+        var affectedCars = new HashSet<long> { carId };
+        try
+        {
+            Exec("SAVEPOINT power_builder");
+
+            if (doBoost)
+            {
+                var boost = ApplyHighestTurboScale(engineId.Value, boostScale);
+                int rows = boost == null ? 0 : 1;
+                foreach (long id in CarsUsingEngine(engineId.Value)) affectedCars.Add(id);
+                Log(boost == null
+                    ? "boost scale skipped: this engine has no turbo upgrade row"
+                    : $"boost scale applied to highest turbo Level {boost.Level}: {boost.Scale0:0.####} / {boost.Scale1:0.####} (original ratio preserved)",
+                    rows > 0 ? "ok" : "warn");
+            }
+
+            if (doRedline)
+            {
+                int rows = 0, capped = 0;
+                foreach (var cam in Query("SELECT Id,TorqueCurveMaxRPM FROM List_UpgradeEngineCamshaft WHERE EngineID=?", engineId.Value))
+                {
+                    double curveMax = Convert.ToDouble(cam["TorqueCurveMaxRPM"] ?? redlineRpm);
+                    double applied = Math.Min(redlineRpm, curveMax);
+                    if (applied < redlineRpm) capped++;
+                    rows += Exec("UPDATE List_UpgradeEngineCamshaft SET RedlineRPM=? WHERE Id=?", applied, cam["Id"]);
+                }
+                foreach (long id in CarsUsingEngine(engineId.Value)) affectedCars.Add(id);
+                Log($"redline requested {redlineRpm:0} RPM across {rows} camshaft row(s){(capped > 0 ? $" · {capped} capped by TorqueCurveMaxRPM" : "")}", rows > 0 ? "ok" : "warn");
+            }
+
+            if (doWeight)
+            {
+                int rows = Exec(@"UPDATE List_UpgradeCarBodyWeight SET CMBackFront=?
+                                  WHERE Level=2 AND CarBodyId IN
+                                    (SELECT CarBodyID FROM List_UpgradeCarBody WHERE Ordinal=?)",
+                                weightDistribution, carId);
+                Log($"Level 2 weight distribution set to {weightDistribution:0.####} ({weightDistribution * 100:0.##}%) on {rows} body row(s)" +
+                    (weightDistribution < 0.40 ? " · wheelie-prone" : ""), rows > 0 ? "ok" : "warn");
+            }
+
+            if (doEv)
+            {
+                var parts = Query("SELECT Id,Level,IsStock FROM List_UpgradeMotorParts WHERE MotorID=? ORDER BY Level,Id", motorId.Value);
+                long maxLevel = parts.Where(r => Convert.ToInt64(r["IsStock"] ?? 0L) == 0)
+                    .Select(r => Convert.ToInt64(r["Level"] ?? 0L)).DefaultIfEmpty(0).Max();
+                if (maxLevel <= 0) throw new InvalidOperationException("selected motor has no non-stock motor-parts upgrades to scale");
+                foreach (var part in parts)
+                {
+                    bool stock = Convert.ToInt64(part["IsStock"] ?? 0L) == 1;
+                    long level = Convert.ToInt64(part["Level"] ?? 0L);
+                    double scale = stock ? 1d : 1d + (evMaxScale - 1d) * Math.Clamp(level / (double)maxLevel, 0d, 1d);
+                    Exec("UPDATE List_UpgradeMotorParts SET TorqueScale=? WHERE Id=?", Math.Round(scale, 6), part["Id"]);
+                }
+                foreach (long id in CarsUsingMotor(motorId.Value)) affectedCars.Add(id);
+                Log($"EV torque ladder spread evenly from 1.0× to {evMaxScale:0.####}× across {parts.Count} row(s)", "ok");
+            }
+
+            Exec("RELEASE power_builder");
+            MarkModified(affectedCars.ToArray());
+            LoadMotors();
+            RenderEngines();
+            PopulatePowerBuilder();
+            RenderCars();
+            Log($"power builder complete · {_modifiedCars.Count} car(s) marked modified this session", "ok");
+        }
+        catch (Exception ex)
+        {
+            try { Exec("ROLLBACK TO power_builder"); Exec("RELEASE power_builder"); } catch { }
+            Log("power builder failed: " + ex.Message, "err");
+        }
+    }
+
+    void ApplyBatchPowerBuilder(IReadOnlyCollection<CarItem> cars, bool confirm = true)
+    {
+        bool doBoost = OptPowerBoost.IsChecked == true;
+        bool doRedline = OptPowerRedline.IsChecked == true;
+        bool doWeight = OptPowerWeight.IsChecked == true;
+        bool doEv = OptPowerEvTorque.IsChecked == true;
+        if (!doBoost && !doRedline && !doWeight && !doEv)
+        { Log("select at least one power-builder setting", "warn"); return; }
+
+        double boostScale = 0, redlineRpm = 0, weightDistribution = 0, evMaxScale = 0;
+        if (doBoost && !TryPowerNumber(PowerBoostScale, "boost scale", 0.01, 100, out boostScale)) return;
+        if (doRedline && !TryPowerNumber(PowerRedline, "redline", 500, 30000, out redlineRpm)) return;
+        if (doWeight)
+        {
+            if (!TryPowerNumber(PowerWeightDistribution, "weight distribution", 0, 100, out weightDistribution)) return;
+            if (weightDistribution > 1) weightDistribution /= 100d;
+        }
+        if (doEv && !TryPowerNumber(PowerEvTorque, "EV torque scale", 0.01, 100, out evMaxScale)) return;
+        if (confirm && MessageBox.Show($"Apply the selected power settings to the stock powertrain of all {cars.Count} selected cars?\n\n" +
+                                       "Engine and motor records are shared by ID, so unselected cars using those IDs may also change.",
+                                       "Confirm batch power edit", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        long[] engineIds = cars.Select(c => ScalarL("SELECT EngineID FROM List_UpgradeEngine WHERE Ordinal=? AND IsStock=1 LIMIT 1", c.Id))
+            .Where(id => id.HasValue).Select(id => id.Value).Distinct().ToArray();
+        long[] motorIds = cars.Select(c => ScalarL("SELECT MotorID FROM List_UpgradeMotor WHERE Ordinal=? AND IsStock=1 LIMIT 1", c.Id))
+            .Where(id => id.HasValue).Select(id => id.Value).Distinct().ToArray();
+        var affectedCars = cars.Select(c => c.Id).ToHashSet();
+        try
+        {
+            Exec("SAVEPOINT batch_power_builder");
+            int boostRows = 0, camRows = 0, capped = 0, weightRows = 0, motorRows = 0;
+            if (doBoost)
+                foreach (long engineId in engineIds)
+                {
+                    if (ApplyHighestTurboScale(engineId, boostScale) != null) boostRows++;
+                    foreach (long id in CarsUsingEngine(engineId)) affectedCars.Add(id);
+                }
+            if (doRedline)
+                foreach (long engineId in engineIds)
+                {
+                    foreach (var cam in Query("SELECT Id,TorqueCurveMaxRPM FROM List_UpgradeEngineCamshaft WHERE EngineID=?", engineId))
+                    {
+                        double curveMax = Convert.ToDouble(cam["TorqueCurveMaxRPM"] ?? redlineRpm);
+                        double applied = Math.Min(redlineRpm, curveMax);
+                        if (applied < redlineRpm) capped++;
+                        camRows += Exec("UPDATE List_UpgradeEngineCamshaft SET RedlineRPM=? WHERE Id=?", applied, cam["Id"]);
+                    }
+                    foreach (long id in CarsUsingEngine(engineId)) affectedCars.Add(id);
+                }
+            if (doWeight)
+                foreach (var car in cars)
+                    weightRows += Exec(@"UPDATE List_UpgradeCarBodyWeight SET CMBackFront=?
+                                         WHERE Level=2 AND CarBodyId IN
+                                           (SELECT CarBodyID FROM List_UpgradeCarBody WHERE Ordinal=?)",
+                                       weightDistribution, car.Id);
+            if (doEv)
+                foreach (long motorId in motorIds)
+                {
+                    var parts = Query("SELECT Id,Level,IsStock FROM List_UpgradeMotorParts WHERE MotorID=? ORDER BY Level,Id", motorId);
+                    long maxLevel = parts.Where(r => Convert.ToInt64(r["IsStock"] ?? 0L) == 0)
+                        .Select(r => Convert.ToInt64(r["Level"] ?? 0L)).DefaultIfEmpty(0).Max();
+                    if (maxLevel <= 0) continue;
+                    foreach (var part in parts)
+                    {
+                        bool stock = Convert.ToInt64(part["IsStock"] ?? 0L) == 1;
+                        long level = Convert.ToInt64(part["Level"] ?? 0L);
+                        double scale = stock ? 1d : 1d + (evMaxScale - 1d) * Math.Clamp(level / (double)maxLevel, 0d, 1d);
+                        motorRows += Exec("UPDATE List_UpgradeMotorParts SET TorqueScale=? WHERE Id=?", Math.Round(scale, 6), part["Id"]);
+                    }
+                    foreach (long id in CarsUsingMotor(motorId)) affectedCars.Add(id);
+                }
+            Exec("RELEASE batch_power_builder");
+            MarkModified(affectedCars.ToArray());
+            LoadMotors(); RenderEngines(); RenderCars(); PickCar();
+            Log($"batch power complete · boost {boostRows} row(s) · redline {camRows} row(s)" +
+                (capped > 0 ? $" ({capped} capped)" : "") + $" · weight {weightRows} row(s) · motor {motorRows} row(s)", "ok");
+        }
+        catch (Exception ex)
+        {
+            try { Exec("ROLLBACK TO batch_power_builder"); Exec("RELEASE batch_power_builder"); } catch { }
+            Log("batch power builder failed: " + ex.Message, "err");
+        }
     }
 
     void Autoshow_Click(object s, RoutedEventArgs e)
     {
         if (_car == null) return;
         bool avail = OptAutoshow.IsChecked == true;
-        Exec("UPDATE Data_Car SET NotAvailableInAutoshow=? WHERE Id=?", avail ? 0 : 1, _car.Id);
-        Log(avail ? $"✓ {_car.Media} now shows in the Autoshow" : $"{_car.Media} hidden from the Autoshow", avail ? "ok" : "warn");
-        ShowCarInfo();
+        var targets = SelectedCars();
+        foreach (var car in targets)
+            Exec("UPDATE Data_Car SET NotAvailableInAutoshow=? WHERE Id=?", avail ? 0 : 1, car.Id);
+        RefreshModifiedAfterExcludedEdit();
+        string subject = targets.Count > 1 ? $"{targets.Count} selected cars" : _car.Media;
+        Log(avail ? $"✓ {subject} now show in the Autoshow" : $"{subject} hidden from the Autoshow", avail ? "ok" : "warn");
+        if (targets.Count > 1) PickCar(); else ShowCarInfo();
     }
 
     void SetFeCarsAutoshowAvailability(bool available)
@@ -482,6 +1364,7 @@ public partial class CarEditorView : UserControl
         int unavailable = available ? 0 : 1;
         int changed = Exec($@"UPDATE Data_Car SET NotAvailableInAutoshow=?
                               WHERE ({feCars}) AND NotAvailableInAutoshow<>?", unavailable, unavailable);
+        RefreshModifiedAfterExcludedEdit();
         Log(available
                 ? $"made all {total} FE cars available in the Autoshow · {changed} newly enabled"
                 : $"hid all {total} FE cars from the Autoshow · {changed} newly hidden",
@@ -493,6 +1376,7 @@ public partial class CarEditorView : UserControl
     {
         if (_conn == null) return;
         int changed = Exec("UPDATE Data_Car SET BaseCost=1 WHERE BaseCost<>1");
+        RefreshModifiedAfterExcludedEdit();
         Log($"set {changed} car prices to 1 CR", "ok");
     }
 
@@ -505,6 +1389,7 @@ public partial class CarEditorView : UserControl
             foreach (var pair in _loadedBaseCosts)
                 Exec("UPDATE Data_Car SET BaseCost=? WHERE Id=?", pair.Value, pair.Key);
             Exec("COMMIT");
+            RefreshModifiedAfterExcludedEdit();
             Log($"restored {_loadedBaseCosts.Count} loaded car prices", "ok");
         }
         catch (Exception ex)
@@ -717,6 +1602,7 @@ public partial class CarEditorView : UserControl
             int gripRows = ApplyEnhancedTireGrip(carId, snapshot.Created);
 
             Exec("RELEASE lotus_handling");
+            MarkModified(carId);
             Log($"✓ enhanced Lotus handling applied · all suspension levels · {antiRows} anti-roll · {weightRows} low-CG · {chassisRows} chassis · {gripRows}/{tireRows} grip/tire rows", "ok");
             ShowCarInfo();
         }
@@ -743,6 +1629,7 @@ public partial class CarEditorView : UserControl
                 SetColumns(saved.Table, saved.KeyColumn, saved.KeyValue, saved.Values.Keys.ToArray(), saved.Values);
             Exec("RELEASE revert_lotus_handling");
             _handlingSnapshots.Remove(_car.Id);
+            MarkModified(_car.Id);
             Log($"✓ restored pre-Lotus handling values · removed {snapshot.Created.Count} generated rows", "ok");
             ShowCarInfo();
         }
@@ -791,6 +1678,181 @@ public partial class CarEditorView : UserControl
     void AddOF(object s, RoutedEventArgs e) => AddNum(OFBoxes, _ofF);
     void AddOR(object s, RoutedEventArgs e) => AddNum(ORBoxes, _ofR);
 
+    void AddBatchFitmentPreset(System.Windows.Controls.Panel panel, List<TextBox> values,
+                               string label, double step, string toolTip)
+    {
+        int clicks = 0;
+        var queuedValues = new List<TextBox>();
+        var preset = new Button
+        {
+            Content = label,
+            ToolTip = toolTip + " Each left-click queues the next level; right-click removes the last one.",
+        };
+        if (TryFindResource("BatchStepButton") is Style style) preset.Style = style;
+
+        void RefreshButton()
+        {
+            preset.Content = clicks == 0 ? label : $"{label}   ×{clicks}";
+            if (clicks > 0)
+            {
+                preset.Background = new SolidColorBrush(Color.FromArgb(0x55, 0xE8, 0x17, 0x5D));
+                if (TryFindResource("Pink") is Brush pink) preset.BorderBrush = pink;
+            }
+            else
+            {
+                preset.ClearValue(Control.BackgroundProperty);
+                preset.ClearValue(Control.BorderBrushProperty);
+            }
+        }
+
+        preset.Click += (_, _) =>
+        {
+            if (values.Count >= MaxFit) return;
+            clicks++;
+            var backingValue = MakeNum((step * clicks).ToString("0.###", CultureInfo.InvariantCulture));
+            backingValue.Visibility = Visibility.Collapsed;
+            values.Add(backingValue);
+            queuedValues.Add(backingValue);
+            RefreshButton();
+        };
+        preset.MouseRightButtonUp += (_, e) =>
+        {
+            if (queuedValues.Count == 0) return;
+            var backingValue = queuedValues[^1];
+            queuedValues.RemoveAt(queuedValues.Count - 1);
+            values.Remove(backingValue);
+            clicks--;
+            RefreshButton();
+            e.Handled = true;
+        };
+        panel.Children.Add(preset);
+    }
+
+    void ShowSingleCarFitmentAddButtons(bool show)
+    {
+        var visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var button in new[] { AddRFBtn, AddWFBtn, AddWRBtn, AddSWBtn, AddOFBtn, AddORBtn })
+            button.Visibility = visibility;
+    }
+
+    void PrepareBatchFitmentTemplate()
+    {
+        foreach (var (panel, list) in new (System.Windows.Controls.Panel Panel, List<TextBox> Boxes)[]
+                 {
+                     (RFBoxes, _rf), (WFBoxes, _wf), (WRBoxes, _wr),
+                     (SWBoxes, _sw), (OFBoxes, _ofF), (ORBoxes, _ofR),
+                 })
+        {
+            panel.Children.Clear();
+            list.Clear();
+        }
+
+        AddBatchFitmentPreset(RFBoxes, _rf, "−1  smaller", -1, "Add progressively smaller rim options from each car's stock size.");
+        AddBatchFitmentPreset(RFBoxes, _rf, "+1  larger", 1, "Add progressively larger rim options from each car's stock size.");
+
+        AddBatchFitmentPreset(WFBoxes, _wf, "−10  narrower", -10, "Add progressively narrower front tire options from stock.");
+        AddBatchFitmentPreset(WFBoxes, _wf, "+10  wider", 10, "Add progressively wider front tire options from stock.");
+        AddBatchFitmentPreset(WRBoxes, _wr, "−10  narrower", -10, "Add progressively narrower rear tire options from stock.");
+        AddBatchFitmentPreset(WRBoxes, _wr, "+10  wider", 10, "Add progressively wider rear tire options from stock.");
+
+        AddBatchFitmentPreset(SWBoxes, _sw, "−2  lower", -2, "Add progressively lower tire-profile options from stock.");
+        AddBatchFitmentPreset(SWBoxes, _sw, "+2  taller", 2, "Add progressively taller tire-profile options from stock.");
+
+        AddBatchFitmentPreset(OFBoxes, _ofF, "+0.02 m  wider", 0.02, "Add progressive front-track extensions from the widest existing option.");
+        AddBatchFitmentPreset(ORBoxes, _ofR, "+0.02 m  wider", 0.02, "Add progressive rear-track extensions from the widest existing option.");
+        ShowSingleCarFitmentAddButtons(false);
+        TrackExampleText.Visibility = Visibility.Collapsed;
+    }
+
+    // Add a complete body target rather than only a display tab. Each car owns a
+    // 1000-wide ID block; body indices 1-9 each receive a 100-wide child-row block.
+    // Clone the stock body's dependent rows so the new kit has usable wheels,
+    // fitment, aero/body-part menus, weight and chassis data from the start.
+    void AddBodyKit_Click(object s, RoutedEventArgs e)
+    {
+        if (_car == null) { Log("pick a car first", "warn"); return; }
+        if (SelectedCars().Count > 1) { Log("bodykits cannot be added in batch mode", "warn"); return; }
+
+        long carId = _car.Id;
+        var stock = Query("SELECT * FROM List_UpgradeCarBody WHERE Ordinal=? AND IsStock=1 ORDER BY Id LIMIT 1", carId).FirstOrDefault();
+        if (stock == null) { Log("bodykit skipped: this car has no stock body row to clone", "warn"); return; }
+
+        long stockBodyId = Convert.ToInt64(stock["CarBodyID"]);
+        long newBodyId = 0;
+        for (int bodyIndex = 1; bodyIndex <= 9; bodyIndex++)
+        {
+            long candidate = stockBodyId + bodyIndex;
+            if ((ScalarL("SELECT COUNT(*) FROM List_UpgradeCarBody WHERE Ordinal=? AND CarBodyID=?", carId, candidate) ?? 0) == 0)
+            {
+                newBodyId = candidate;
+                break;
+            }
+        }
+        if (newBodyId == 0)
+        {
+            Log("bodykit skipped: all nine bodykit slots are already used for this car", "warn");
+            return;
+        }
+
+        const string savepoint = "add_bodykit";
+        try
+        {
+            Exec("SAVEPOINT " + savepoint);
+
+            stock["Id"] = FreeBodyUpgradeId("List_UpgradeCarBody", newBodyId, 0);
+            stock["Ordinal"] = carId;
+            stock["Level"] = 1L;
+            stock["CarBodyID"] = newBodyId;
+            stock["IsStock"] = 0L;
+            stock["ManufacturerID"] = 492L;
+            stock["MassDiff"] = 0d;
+            stock["Price"] = 5000L;
+            stock["RequiresGraphics"] = 1L;
+            stock["releaseOrder"] = 0L;
+            InsertClonedRow("List_UpgradeCarBody", stock);
+
+            int cloned = 0;
+            foreach (var (table, bodyColumn) in new[]
+            {
+                ("List_UpgradeCarBodyChassisStiffness", "CarbodyId"),
+                ("List_UpgradeCarBodyFrontBumper", "CarBodyID"),
+                ("List_UpgradeCarBodyHood", "CarBodyID"),
+                ("List_UpgradeCarBodyRearBumper", "CarBodyID"),
+                ("List_UpgradeCarBodySideSkirt", "CarBodyID"),
+                ("List_UpgradeCarBodyTireAspectRatioFront", "CarBodyId"),
+                ("List_UpgradeCarBodyTireAspectRatioRear", "CarBodyId"),
+                ("List_UpgradeCarBodyTireWidthFront", "CarBodyId"),
+                ("List_UpgradeCarBodyTireWidthRear", "CarBodyId"),
+                ("List_UpgradeCarBodyTrackSpacingFront", "CarBodyId"),
+                ("List_UpgradeCarBodyTrackSpacingRear", "CarBodyId"),
+                ("List_UpgradeCarBodyWeight", "CarBodyId")
+            })
+            {
+                int slot = 0;
+                foreach (var row in Query($"SELECT * FROM \"{table}\" WHERE \"{bodyColumn}\"=? ORDER BY Id", stockBodyId))
+                {
+                    row["Id"] = FreeBodyUpgradeId(table, newBodyId, slot++);
+                    row[bodyColumn] = newBodyId;
+                    InsertClonedRow(table, row);
+                    cloned++;
+                }
+            }
+
+            Exec("RELEASE " + savepoint);
+            MarkModified(carId);
+            PopulateBodyTargets(carId);
+            var newTab = _bodyTabs.FirstOrDefault(t => Convert.ToInt64(t.Tag) == newBodyId);
+            if (newTab != null) BodyTargets.SelectedItem = newTab;
+            FillFitment();
+            Log($"✓ added bodykit {newBodyId - stockBodyId} (CarBodyID {newBodyId}) · cloned {cloned} stock body rows", "ok");
+        }
+        catch (Exception ex)
+        {
+            try { Exec("ROLLBACK TO " + savepoint); Exec("RELEASE " + savepoint); } catch { }
+            Log("bodykit creation failed: " + ex.Message, "err");
+        }
+    }
+
     // Build one tab per real CarBody row. Only the active tab is edited.
     void PopulateBodyTargets(long carId)
     {
@@ -813,6 +1875,7 @@ public partial class CarEditorView : UserControl
     }
     long[] SelectedBodies()
     {
+        if (_batchRunning && _car != null) return new[] { BodyId(_car.Id) };
         return BodyTargets.SelectedItem is TabItem tab
             ? new[] { (long)tab.Tag }
             : (_car != null ? new[] { BodyId(_car.Id) } : System.Array.Empty<long>());
@@ -833,7 +1896,7 @@ public partial class CarEditorView : UserControl
     }
     void FillFitment()
     {
-        if (_car == null) return;
+        if (_car == null || _batchRunning) return;
         long body = FirstBody();
         bool widebody = BodyTargets.SelectedItem is TabItem selected &&
                         !string.Equals(selected.Header?.ToString(), "Stock body", StringComparison.OrdinalIgnoreCase);
@@ -850,7 +1913,7 @@ public partial class CarEditorView : UserControl
     }
     void PopulateFitmentFields()
     {
-        if (_car == null) return;
+        if (_car == null || _batchRunning) return;
         PopulateBodyTargets(_car.Id);
         FillRims(_car.Id);
         FillFitment();
@@ -873,7 +1936,9 @@ public partial class CarEditorView : UserControl
                                   SELECT RearWheelDiameter v FROM List_UpgradeRimSizeRear WHERE Ordinal=(SELECT Ordinal FROM target) AND IsStock=0
                                 ) ORDER BY v", "0", carId, boxCount);
     }
-    void ResetFitment_Click(object s, RoutedEventArgs e)
+    void ResetFitment_Click(object s, RoutedEventArgs e) => RunForSelectedCars("reset stock-body fitment", ResetCurrentFitment);
+
+    void ResetCurrentFitment()
     {
         if (_car == null) { Log("pick a car first", "warn"); return; }
         var bodies = SelectedBodies();
@@ -885,6 +1950,7 @@ public partial class CarEditorView : UserControl
                     "List_UpgradeCarBodyTireAspectRatioFront","List_UpgradeCarBodyTireAspectRatioRear",
                     "List_UpgradeCarBodyTrackSpacingFront","List_UpgradeCarBodyTrackSpacingRear" })
                     Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
+            MarkModified(_car.Id);
             Log($"↺ fitment reset to stock on {bodies.Length} body/bodies", "ok");
             FillFitment();
         }
@@ -904,7 +1970,7 @@ public partial class CarEditorView : UserControl
     }
     void RenderEngines()
     {
-        if (EngList == null) return;
+        if (EngList == null || _batchRunning) return;
         if (MotorMode) { RenderMotors(); return; }
         if (_car == null) return;
         var term = (EngSearch.Text ?? "").ToLower();
@@ -931,26 +1997,47 @@ public partial class CarEditorView : UserControl
     bool AddEngineSwap(long eid, bool quiet)
     {
         var carId = _car.Id;
+        if (_electricSpecCars.Contains(carId))
+        { if (!quiet) Log("set a stock combustion engine before adding engine swaps to an EV", "warn"); return false; }
         if ((ScalarL("SELECT COUNT(*) FROM List_UpgradeEngine WHERE Ordinal=? AND EngineID=?", carId, eid) ?? 0) > 0)
         { if (!quiet) Log("already on car: " + EngName(eid), "warn"); return false; }
         long id = NextId("List_UpgradeEngine", carId), lvl = NextLevel("List_UpgradeEngine", "Ordinal", carId);
         Exec(@"INSERT INTO List_UpgradeEngine (Id,Ordinal,Level,EngineID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,DragScale,WindInstabilityScale,releaseOrder)
                VALUES (?,?,?,?,0,?,50,0,0,1,1,0)", id, carId, lvl, eid, EngManuf(eid));
+        MarkModified(carId);
         if (!quiet) Log("＋ swap added: " + EngName(eid), "ok");
         return true;
     }
     void AddAllMake()
     {
         if (_car == null) { Log("pick a car first", "warn"); return; }
+        if (_electricSpecCars.Contains(_car.Id)) { Log("convert this EV to combustion before adding engine swaps", "warn"); return; }
         var mk = MakeFilter.SelectedIndex > 0 ? (string)MakeFilter.SelectedItem : "";
         if (mk.Length == 0) { Log("choose a make first", "warn"); return; }
         int n = 0; foreach (var en in _engines.Where(en => en.Media.Split('_')[0] == mk)) if (AddEngineSwap(en.Id, true)) n++;
         Log($"＋ added {n} {mk} engines", "ok"); RefreshCar();
     }
+    void AddAllType()
+    {
+        if (_car == null) { Log("pick a car first", "warn"); return; }
+        if (_electricSpecCars.Contains(_car.Id)) { Log("convert this EV to combustion before adding engine swaps", "warn"); return; }
+        string type = TypeFilter.SelectedIndex > 0 ? (string)TypeFilter.SelectedItem : "";
+        if (string.IsNullOrEmpty(type)) { Log("choose an engine type first (I4, I6, V6, V8, etc.)", "warn"); return; }
+
+        var matches = _engines.Where(en => en.EngType == type).ToArray();
+        int added = 0;
+        foreach (var engine in matches)
+            if (AddEngineSwap(engine.Id, true)) added++;
+
+        Log($"＋ added {added} {type} engine{(added == 1 ? "" : "s")} ({matches.Length - added} already on car)", "ok");
+        RefreshCar();
+        RenderEngines();
+    }
     void AddAllEngines()
     {
         if (_car == null) { Log("pick a car first", "warn"); return; }
-        if (MessageBox.Show($"Add every engine in the game ({_engines.Count}) to this car?", "Confirm", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        if (_electricSpecCars.Contains(_car.Id)) { Log("convert this EV to combustion before adding engine swaps", "warn"); return; }
+        if (!_batchRunning && MessageBox.Show($"Add every engine in the game ({_engines.Count}) to this car?", "Confirm", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         int n = 0; foreach (var en in _engines) if (AddEngineSwap(en.Id, true)) n++;
         Log($"＋ added {n} engines (all)", "ok"); RefreshCar();
     }
@@ -960,38 +2047,63 @@ public partial class CarEditorView : UserControl
         if (_car == null) { Log("pick a car first", "warn"); return; }
         if (SelEng() is not EngItem e) { Log("pick an engine first", "warn"); return; }
         var carId = _car.Id; var eid = e.Id;
-        bool wasEV = (ScalarL("SELECT COUNT(*) FROM List_UpgradeMotor WHERE Ordinal=? AND IsStock=1", carId) ?? 0) > 0;
-        var donor = Query("SELECT Id,PowertrainID,NumGears,EngineConfigID,CylinderID,AspirationTypeId,Displacement FROM Data_Car WHERE MediaName=?", e.Media).FirstOrDefault();
-        if (donor != null)
-            Exec("UPDATE Data_Car SET PowertrainID=?,NumGears=?,EngineConfigID=?,CylinderID=?,AspirationTypeId=?,Displacement=? WHERE Id=?",
-                donor["PowertrainID"], donor["NumGears"], donor["EngineConfigID"], donor["CylinderID"], donor["AspirationTypeId"], donor["Displacement"], carId);
-        else
+        bool wasEV = _electricSpecCars.Contains(carId);
+        long hadMotor = ScalarL("SELECT COUNT(*) FROM List_UpgradeMotor WHERE Ordinal=?", carId) ?? 0;
+        var donor = Query("SELECT Id,PowertrainID,NumGears,EngineConfigID,CylinderID,AspirationTypeId,Displacement FROM Data_Car WHERE MediaName=? AND EngineConfigID<>6", e.Media).FirstOrDefault()
+            ?? Query(@"SELECT c.Id,c.PowertrainID,c.NumGears,c.EngineConfigID,c.CylinderID,c.AspirationTypeId,c.Displacement
+                       FROM Data_Car c JOIN List_UpgradeEngine le ON le.Ordinal=c.Id
+                       WHERE le.EngineID=? AND le.IsStock=1 AND c.EngineConfigID<>6 ORDER BY c.Id LIMIT 1", eid).FirstOrDefault();
+        if (wasEV && donor == null)
+        { Log("cannot convert EV to ICE: this engine has no combustion donor car for a complete Data_Car spec", "warn"); return; }
+        long manufacturer = EngManuf(eid);
+        try
         {
-            var de = Query("SELECT ConfigID,CylinderID FROM Data_Engine WHERE EngineID=?", eid).First();
-            Exec("UPDATE Data_Car SET EngineConfigID=?,CylinderID=? WHERE Id=?", de["ConfigID"], de["CylinderID"], carId);
-            Log("no donor car for this engine — copied basic config only", "warn");
+            Exec("SAVEPOINT set_stock_engine");
+            if (donor != null)
+                Exec("UPDATE Data_Car SET PowertrainID=?,NumGears=?,EngineConfigID=?,CylinderID=?,AspirationTypeId=?,Displacement=? WHERE Id=?",
+                    donor["PowertrainID"], donor["NumGears"], donor["EngineConfigID"], donor["CylinderID"], donor["AspirationTypeId"], donor["Displacement"], carId);
+            else
+            {
+                var de = Query("SELECT ConfigID,CylinderID FROM Data_Engine WHERE EngineID=?", eid).First();
+                Exec("UPDATE Data_Car SET EngineConfigID=?,CylinderID=? WHERE Id=?", de["ConfigID"], de["CylinderID"], carId);
+            }
+
+            long? existingLink = ScalarL("SELECT Id FROM List_UpgradeEngine WHERE Ordinal=? AND EngineID=? ORDER BY IsStock DESC,Id LIMIT 1", carId, eid);
+            Exec("DELETE FROM List_UpgradeEngine WHERE Ordinal=? AND IsStock=1 AND EngineID<>?", carId, eid);
+            if (existingLink.HasValue)
+                Exec("UPDATE List_UpgradeEngine SET IsStock=1,Level=0,Price=0 WHERE Id=?", existingLink.Value);
+            else
+            {
+                long id = NextId("List_UpgradeEngine", carId);
+                Exec(@"INSERT INTO List_UpgradeEngine (Id,Ordinal,Level,EngineID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,DragScale,WindInstabilityScale,releaseOrder)
+                       VALUES (?,?,0,?,1,?,0,0,0,1,1,0)", id, carId, eid, manufacturer);
+            }
+            // ICE and EV menus are mutually exclusive, including non-stock swap options.
+            Exec("DELETE FROM List_UpgradeMotor WHERE Ordinal=?", carId);
+            if (donor != null)
+            {
+                var ddt = Query("SELECT DrivetrainID,PowertrainId,ManufacturerId FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=1", donor["Id"]).FirstOrDefault();
+                if (ddt != null && (ScalarL("SELECT COUNT(*) FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=1", carId) ?? 0) > 0)
+                    Exec("UPDATE List_UpgradeDrivetrain SET DrivetrainID=?,PowertrainId=?,ManufacturerId=? WHERE Ordinal=? AND IsStock=1",
+                        ddt["DrivetrainID"], ddt["PowertrainId"], ddt["ManufacturerId"], carId);
+            }
+            Exec("RELEASE set_stock_engine");
+
+            _electricSpecCars.Remove(carId);
+            int idx = _cars.FindIndex(x => x.Id == carId);
+            if (idx >= 0) { _cars[idx] = _cars[idx] with { Type = TypeFor(carId, _car.Media) }; _car = _cars[idx]; }
+            MarkModified(carId);
+            _powerTargetCarId = null;
+            RefreshCar(); RenderCars();
+            Log((wasEV ? "⚡→⛽ EV converted to ICE. " : "★ stock engine set. ") + "Stock = " + EngName(eid), "ok");
+            if (hadMotor > 0) Log($"   removed all {hadMotor} motor option(s); combustion spec and gearbox fitted", "info");
+            if (donor == null) Log("no donor car for this engine — copied basic config only", "warn");
         }
-        Exec("DELETE FROM List_UpgradeEngine WHERE Ordinal=? AND IsStock=1", carId);
-        long id = NextId("List_UpgradeEngine", carId);
-        Exec(@"INSERT INTO List_UpgradeEngine (Id,Ordinal,Level,EngineID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,DragScale,WindInstabilityScale,releaseOrder)
-               VALUES (?,?,0,?,1,?,0,0,0,1,1,0)", id, carId, eid, EngManuf(eid));
-        long hadMotor = ScalarL("SELECT COUNT(*) FROM List_UpgradeMotor WHERE Ordinal=? AND IsStock=1", carId) ?? 0;
-        if (hadMotor > 0) Exec("DELETE FROM List_UpgradeMotor WHERE Ordinal=? AND IsStock=1", carId);
-        if (donor != null)
+        catch (Exception ex)
         {
-            var ddt = Query("SELECT DrivetrainID,PowertrainId,ManufacturerId FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=1", donor["Id"]).FirstOrDefault();
-            if (ddt != null && (ScalarL("SELECT COUNT(*) FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=1", carId) ?? 0) > 0)
-                Exec("UPDATE List_UpgradeDrivetrain SET DrivetrainID=?,PowertrainId=?,ManufacturerId=? WHERE Ordinal=? AND IsStock=1",
-                    ddt["DrivetrainID"], ddt["PowertrainId"], ddt["ManufacturerId"], carId);
+            try { Exec("ROLLBACK TO set_stock_engine"); Exec("RELEASE set_stock_engine"); } catch { }
+            Log("stock engine conversion failed: " + ex.Message, "err");
         }
-        Log((wasEV ? "⚡→⛽ EV converted to ICE. " : "★ stock engine set. ") + "Stock = " + EngName(eid), "ok");
-        if (wasEV && hadMotor > 0) Log("   motor removed, gearbox fitted, spec copied", "info");
-        // reflect the new state in the car list + info (moves a converted EV into the ICE filter)
-        _stockEngineCars.Add(carId); _stockMotorCars.Remove(carId);
-        int idx = _cars.FindIndex(x => x.Id == carId);
-        if (idx >= 0) { _cars[idx] = _cars[idx] with { Type = TypeFor(carId, _car.Media) }; _car = _cars[idx]; }
-        RefreshCar();
-        RenderCars();
     }
 
     // add a motor as a selectable (non-stock) swap option in the car's motor menu
@@ -999,18 +2111,22 @@ public partial class CarEditorView : UserControl
     {
         if (_car == null) { if (!quiet) Log("pick a car first", "warn"); return false; }
         long carId = _car.Id;
+        if (!_electricSpecCars.Contains(carId))
+        { if (!quiet) Log("convert this ICE car to electric before adding motor options", "warn"); return false; }
         if ((ScalarL("SELECT COUNT(*) FROM List_UpgradeMotor WHERE Ordinal=? AND MotorID=?", carId, motorId) ?? 0) > 0)
         { if (!quiet) Log("already on car: " + MotorName(motorId), "warn"); return false; }
         long id = NextId("List_UpgradeMotor", carId), lvl = NextLevel("List_UpgradeMotor", "Ordinal", carId);
         long manu = ScalarL("SELECT ManufacturerID FROM List_UpgradeMotor WHERE MotorID=? AND IsStock=1 LIMIT 1", motorId) ?? 0;
         Exec(@"INSERT INTO List_UpgradeMotor (Id,Ordinal,Level,MotorID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,releaseOrder)
                VALUES (?,?,?,?,0,?,50,0,0,0)", id, carId, lvl, motorId, manu);
+        MarkModified(carId);
         if (!quiet) { Log("＋ motor option added: " + MotorName(motorId), "ok"); RefreshCar(); }
         return true;
     }
     void AddAllMotors()
     {
         if (_car == null) { Log("pick a car first", "warn"); return; }
+        if (!_electricSpecCars.Contains(_car.Id)) { Log("convert this ICE car to electric before adding motor options", "warn"); return; }
         int n = 0; foreach (var mo in _motors) if (AddMotorOption(mo.Id, true)) n++;
         Log($"＋ added {n} motor options (all)", "ok"); RefreshCar();
     }
@@ -1029,25 +2145,6 @@ public partial class CarEditorView : UserControl
             .OrderByDescending(m => m.Pw * m.MaxScale).ThenByDescending(m => m.Pw).ToList();
     }
 
-    // Give every motor a stock → 3.5× torque-upgrade ladder in the shop (installable in-game).
-    // Keyed by MotorID, so one build covers every car using that motor.
-    void EnsureMotorTorqueLadders()
-    {
-        foreach (var m in _motors)
-        {
-            long motorId = m.Id;
-            long manu = ScalarL("SELECT ManufacturerID FROM List_UpgradeMotorParts WHERE MotorID=? AND IsStock=1 LIMIT 1", motorId) ?? 0;
-            Exec("DELETE FROM List_UpgradeMotorParts WHERE MotorID=?", motorId);
-            double[] scales = { 1.0, 1.25, 2.75, 3.5 };   // stock, then upgrade tiers
-            for (int lvl = 0; lvl < scales.Length; lvl++)
-                Exec(@"INSERT INTO List_UpgradeMotorParts (Id,MotorID,Level,IsStock,ManufacturerID,MassDiff,WeightDistDiff,Price,TorqueScale,releaseOrder)
-                       VALUES (?,?,?,?,?,0,0,?,?,0)",
-                    motorId * 1000 + lvl, motorId, lvl, lvl == 0 ? 1 : 0, manu, lvl == 0 ? 0 : 50, scales[lvl]);
-        }
-        LoadMotors();   // refresh the picker's ▲/× summary
-        Log($"⚡ torque upgrades added to {_motors.Count} motors (stock · 1.25× · 2.75× · 3.5×)", "info");
-    }
-
     // ============================================================ ICE → EV (electric swap)
     void ConvertToElectric(long? pickMotorId = null)
     {
@@ -1064,20 +2161,24 @@ public partial class CarEditorView : UserControl
         string mname = motor["MotorName"] as string;
         string label = string.IsNullOrWhiteSpace(mname) ? mmedia : mname;
 
-        var donor = Query("SELECT Id,PowertrainID,NumGears,EngineConfigID,CylinderID,AspirationTypeId,Displacement FROM Data_Car WHERE MediaName=?", mmedia).FirstOrDefault();
+        const string evSpec = "Id,PowertrainID,NumGears,EngineConfigID,CylinderID,AspirationTypeId,Displacement";
+        var donor = Query($"SELECT {evSpec} FROM Data_Car WHERE MediaName=? AND EngineConfigID=6 AND Displacement=0", mmedia).FirstOrDefault()
+            ?? Query($@"SELECT c.{evSpec.Replace(",", ",c.")} FROM Data_Car c
+                        JOIN List_UpgradeMotor lm ON lm.Ordinal=c.Id
+                        WHERE lm.MotorID=? AND lm.IsStock=1 AND c.EngineConfigID=6 AND c.Displacement=0
+                        ORDER BY c.Id LIMIT 1", motorId).FirstOrDefault()
+            ?? Query($"SELECT {evSpec} FROM Data_Car WHERE EngineConfigID=6 AND Displacement=0 ORDER BY Id LIMIT 1").FirstOrDefault();
+        if (donor == null) { Log("cannot convert to EV: no electric Data_Car donor spec is available", "warn"); return; }
         long manu = 0; Dictionary<string, object> ddt = null;
-        if (donor != null)
-        {
-            long dId = Convert.ToInt64(donor["Id"]);
-            manu = ScalarL("SELECT ManufacturerID FROM List_UpgradeMotor WHERE Ordinal=? AND IsStock=1 LIMIT 1", dId) ?? 0;
-            ddt = Query("SELECT DrivetrainID,PowertrainId,ManufacturerId FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=1", dId).FirstOrDefault();
-        }
+        long dId = Convert.ToInt64(donor["Id"]);
+        manu = ScalarL("SELECT ManufacturerID FROM List_UpgradeMotor WHERE Ordinal=? AND IsStock=1 LIMIT 1", dId) ?? 0;
+        ddt = Query("SELECT DrivetrainID,PowertrainId,ManufacturerId FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=1", dId).FirstOrDefault();
         try
         {
+            Exec("SAVEPOINT convert_to_electric");
             // 1. copy the EV spec fields from the donor (single-speed, electric powertrain, 0 displacement)
-            if (donor != null)
-                Exec("UPDATE Data_Car SET PowertrainID=?,NumGears=?,EngineConfigID=?,CylinderID=?,AspirationTypeId=?,Displacement=? WHERE Id=?",
-                    donor["PowertrainID"], donor["NumGears"], donor["EngineConfigID"], donor["CylinderID"], donor["AspirationTypeId"], donor["Displacement"], carId);
+            Exec("UPDATE Data_Car SET PowertrainID=?,NumGears=?,EngineConfigID=?,CylinderID=?,AspirationTypeId=?,Displacement=? WHERE Id=?",
+                donor["PowertrainID"], donor["NumGears"], donor["EngineConfigID"], donor["CylinderID"], donor["AspirationTypeId"], donor["Displacement"], carId);
             // 2. drop the combustion engine menu — a pure EV has no List_UpgradeEngine rows
             Exec("DELETE FROM List_UpgradeEngine WHERE Ordinal=?", carId);
             // 3. install the motor as the stock (and only) powertrain
@@ -1089,18 +2190,24 @@ public partial class CarEditorView : UserControl
             if (ddt != null && (ScalarL("SELECT COUNT(*) FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=1", carId) ?? 0) > 0)
                 Exec("UPDATE List_UpgradeDrivetrain SET DrivetrainID=?,PowertrainId=?,ManufacturerId=? WHERE Ordinal=? AND IsStock=1",
                     ddt["DrivetrainID"], ddt["PowertrainId"], ddt["ManufacturerId"], carId);
+            Exec("RELEASE convert_to_electric");
 
-            _stockMotorCars.Add(carId); _stockEngineCars.Remove(carId);
+            _electricSpecCars.Add(carId);
             int idx = _cars.FindIndex(x => x.Id == carId);
             if (idx >= 0) { _cars[idx] = _cars[idx] with { Type = TypeFor(carId, _car.Media) }; _car = _cars[idx]; }
             Log($"⛽→⚡ converted to electric — {label} (output ~{mpw:0})", "ok");
             Log("   engine menu removed, single-speed EV drivetrain fitted. Drivetrain swaps can still be added.", "info");
-            if (!_torqueLaddersDone) { EnsureMotorTorqueLadders(); _torqueLaddersDone = true; }
+            MarkModified(carId);
+            _powerTargetCarId = null;
             RefreshCar(); RenderCars();
         }
-        catch (Exception ex) { Log("electric swap failed: " + ex.Message, "err"); }
+        catch (Exception ex)
+        {
+            try { Exec("ROLLBACK TO convert_to_electric"); Exec("RELEASE convert_to_electric"); } catch { }
+            Log("electric swap failed: " + ex.Message, "err");
+        }
     }
-    void Electric_Click(object s, RoutedEventArgs e) => ConvertToElectric();
+    void Electric_Click(object s, RoutedEventArgs e) => RunForSelectedCars("convert to electric", () => ConvertToElectric());
 
     void ApplyOptions()
     {
@@ -1108,9 +2215,14 @@ public partial class CarEditorView : UserControl
         long carId = _car.Id;
         try
         {
+            double driftSteeringAngle = 0;
+            if (OptSlam.IsChecked == true && !TryGetDriftSteeringAngle(out driftSteeringAngle)) return;
+
             if (OptRWD.IsChecked == true)
             {
-                if ((ScalarL("SELECT COUNT(*) FROM Data_Drivetrain WHERE DrivetrainID=2170") ?? 0) > 0)
+                if ((ScalarL("SELECT COUNT(*) FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=0 AND DrivetrainID=2170", carId) ?? 0) > 0)
+                    Log("RWD conversion already present — no duplicate added", "info");
+                else if ((ScalarL("SELECT COUNT(*) FROM Data_Drivetrain WHERE DrivetrainID=2170") ?? 0) > 0)
                 {
                     long id = NextId("List_UpgradeDrivetrain", carId), lvl = NextLevel("List_UpgradeDrivetrain", "Ordinal", carId);
                     Exec(@"INSERT INTO List_UpgradeDrivetrain (Id,Ordinal,DrivetrainID,PowertrainId,MassDiff,WeightDistDiff,Level,ManufacturerId,Price,IsStock,releaseOrder)
@@ -1126,13 +2238,15 @@ public partial class CarEditorView : UserControl
                 var fwd = Query(@"SELECT ud.DrivetrainID d, ud.PowertrainId p, ud.ManufacturerId m
                                   FROM List_UpgradeDrivetrain ud JOIN Data_Drivetrain dd ON dd.DrivetrainID=ud.DrivetrainID
                                   WHERE dd.DrivetypeID=1 AND ud.IsStock=1 LIMIT 1").FirstOrDefault();
-                if (fwd != null)
+                if (fwd != null &&
+                    (ScalarL("SELECT COUNT(*) FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=0 AND DrivetrainID=?", carId, fwd["d"]) ?? 0) == 0)
                 {
                     long id = NextId("List_UpgradeDrivetrain", carId), lvl = NextLevel("List_UpgradeDrivetrain", "Ordinal", carId);
                     Exec(@"INSERT INTO List_UpgradeDrivetrain (Id,Ordinal,DrivetrainID,PowertrainId,MassDiff,WeightDistDiff,Level,ManufacturerId,Price,IsStock,releaseOrder)
                            VALUES (?,?,?,?,0,0,?,?,50,0,0)", id, carId, fwd["d"], fwd["p"], lvl, fwd["m"]);
                     Log("✓ FWD conversion option added (experimental)", "ok");
                 }
+                else if (fwd != null) Log("FWD conversion already present — no duplicate added", "info");
                 else Log("FWD skipped: no FWD gearbox found in this DB", "warn");
             }
 
@@ -1146,22 +2260,38 @@ public partial class CarEditorView : UserControl
                 {
                     long? stock = ScalarL($"SELECT {col} FROM \"{t}\" WHERE Ordinal=? AND IsStock=1", carId);
                     long terminalLevel = ScalarL($"SELECT MAX(Level) FROM \"{t}\" WHERE Ordinal<>? AND IsStock=0", carId) ?? 8;
-                    var diameters = list.Select(OptNum).Where(v => v.HasValue && v.Value > 0)
-                        .Select(v => (int)Math.Round(v!.Value))
-                        .Where(v => !stock.HasValue || v != stock.Value)
+                    var entered = list.Select(OptNum).Where(v => v.HasValue)
+                        .Select(v => (int)Math.Round(v!.Value)).Distinct().ToList();
+                    var diameters = (_batchRunning && stock.HasValue
+                            ? entered.Select(delta => checked((int)stock.Value + delta))
+                            : entered)
+                        .Where(v => v > 0 && (!stock.HasValue || v != stock.Value))
                         .Distinct().OrderBy(v => v).ToList();
-                    Exec($"DELETE FROM \"{t}\" WHERE Ordinal=? AND IsStock=0", carId);
-                    int slot = 1;
+                    var existingRows = Query($"SELECT {col} v FROM \"{t}\" WHERE Ordinal=? AND IsStock=0", carId)
+                        .Select(row => Convert.ToInt32(row["v"])).ToList();
+                    var existing = existingRows.ToHashSet();
+                    if (!_batchRunning)
+                    {
+                        // A second Apply with the same single-car values is a true
+                        // no-op. Do not churn IDs or recreate identical menu tiles.
+                        if (existingRows.Count == diameters.Count && existing.SetEquals(diameters))
+                            continue;
+                        Exec($"DELETE FROM \"{t}\" WHERE Ordinal=? AND IsStock=0", carId);
+                        existing.Clear();
+                    }
+                    int slot = _batchRunning ? existing.Count + 1 : 1;
                     foreach (int dia in diameters)
                     {
+                        if (!existing.Add(dia)) continue;
                         long level = Math.Min(slot, terminalLevel);
                         Exec($"INSERT INTO \"{t}\" (Id,Ordinal,Level,IsStock,{col},Price,MassDiff,DragScale,WindInstabilityScale,RequiresGraphics) VALUES (?,?,?,0,?,?,?,1,1,0)",
-                            carId * 1000 + slot, carId, level, dia, 50, Math.Round(1.36 * (dia - (stock ?? dia)), 2));
+                            _batchRunning ? NextId(t, carId) : carId * 1000 + slot,
+                            carId, level, dia, 50, Math.Round(1.36 * (dia - (stock ?? dia)), 2));
                         slot++;
                     }
                 }
                 string sizes = string.Join(", ", _rf.Select(OptNum).Where(v => v.HasValue).Select(v => Math.Round(v!.Value)));
-                Log($"✓ shared front/rear rim sizes set: [{sizes}]", "ok");
+                Log($"✓ shared front/rear rim sizes {(_batchRunning ? "added from stock-relative deltas" : "set")}: [{sizes}]", "ok");
             }
 
             var fitBodies = SelectedBodies();   // active Stock/Widebody tab in the fitment card
@@ -1184,20 +2314,40 @@ public partial class CarEditorView : UserControl
                     long terminalLevel = nativeCount > 0
                         ? oldLevels.Take(nativeCount).Max(r => Convert.ToInt64(r["Level"]))
                         : 3;
-                    Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
-                    int slot = 1;
-                    foreach (var box in list)
+                    var existingRows = oldLevels.Select(row => Convert.ToInt64(row["v"])).ToList();
+                    var existing = existingRows.ToHashSet();
+                    long stockWidth = ScalarL($"SELECT {col} FROM \"{t}\" WHERE CarBodyId=? AND IsStock=1 ORDER BY Id LIMIT 1", bd) ?? 0;
+                    var requestedWidths = list.Select(OptNum)
+                        .Where(value => value.HasValue && (_batchRunning || value.Value > 0))
+                        .Select(value => _batchRunning ? stockWidth + (long)Math.Round(value!.Value) : (long)value!.Value)
+                        .Where(value => value > 0)
+                        .Distinct().ToList();
+                    if (_batchRunning) requestedWidths.Sort();
+                    if (!_batchRunning)
                     {
-                        if (OptNum(box) is not double v || v <= 0) continue;
-                        long level = slot <= nativeCount
-                            ? Convert.ToInt64(oldLevels[slot - 1]["Level"])
-                            : (nativeCount == 0 && slot <= 3 ? slot : terminalLevel);
+                        var requested = requestedWidths.ToHashSet();
+                        if (existingRows.Count == requested.Count && existing.SetEquals(requested))
+                            continue;
+                        Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
+                        existing.Clear();
+                    }
+                    int slot = _batchRunning ? oldLevels.Count + 1 : 1;
+                    int firstAdded = 0;
+                    foreach (long width in requestedWidths)
+                    {
+                        if (!existing.Add(width)) continue;
+                        long level = !_batchRunning
+                            ? (slot <= nativeCount
+                                ? Convert.ToInt64(oldLevels[slot - 1]["Level"])
+                                : (nativeCount == 0 && slot <= 3 ? slot : terminalLevel))
+                            : (oldLevels.Count == 0 ? Math.Min(++firstAdded, 3) : terminalLevel);
                         Exec($"INSERT INTO \"{t}\" (Id,CarBodyId,Level,IsStock,{col},Price,MassDiff,DragScale,WindInstabilityScale,RequiresGraphics,releaseOrder) VALUES (?,?,?,0,?,?,?,1,1,0,0)",
-                            FitId(bd, slot), bd, level, (long)v, 2000 + 200 * slot, Math.Round(0.54 * slot, 2));
+                            _batchRunning ? FreeBodyUpgradeId(t, bd, slot) : FitId(bd, slot),
+                            bd, level, width, 2000 + 200 * slot, Math.Round(0.54 * slot, 2));
                         slot++;
                     }
                 }
-                Log($"✓ tire widths set on {fitBodies.Length} body/bodies", "ok");
+                Log($"✓ tire widths {(_batchRunning ? "added from stock-relative deltas to" : "set on")} {fitBodies.Length} body/bodies", "ok");
             }
 
             if (OptAspect.IsChecked == true)
@@ -1206,15 +2356,35 @@ public partial class CarEditorView : UserControl
                 foreach (var bd in fitBodies)
                 foreach (var (t, col) in new[] { ("List_UpgradeCarBodyTireAspectRatioFront", "FrontTireAspectRatioOffset"), ("List_UpgradeCarBodyTireAspectRatioRear", "RearTireAspectRatioOffset") })
                 {
-                    Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
-                    for (int i = 0; i < vals.Count; i++)
+                    var existing = Query($"SELECT {col} v FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd)
+                        .Select(row => Convert.ToDouble(row["v"])).ToList();
+                    double stockValue = Convert.ToDouble(Scalar($"SELECT {col} FROM \"{t}\" WHERE CarBodyId=? AND IsStock=1 ORDER BY Id LIMIT 1", bd) ?? 0d);
+                    var enteredValues = vals.Select(enteredValue => Math.Round(
+                            _batchRunning ? stockValue + enteredValue : enteredValue, 2)).ToList();
+                    var requestedValues = enteredValues.Distinct().ToList();
+                    if (_batchRunning) requestedValues.Sort();
+                    if (!_batchRunning)
                     {
+                        bool unchanged = existing.Select(value => Math.Round(value, 2)).OrderBy(value => value)
+                            .SequenceEqual(enteredValues.OrderBy(value => value));
+                        if (unchanged) continue;
+                        Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
+                        existing.Clear();
+                    }
+                    int slot = _batchRunning ? existing.Count + 1 : 1;
+                    foreach (double value in requestedValues)
+                    {
+                        if (existing.Any(current =>
+                                Math.Abs(Math.Round(current, 2) - value) < 0.000001)) continue;
                         // Working extended databases keep every profile option at
                         // Level 1; the unique Id is what distinguishes each tile.
-                        Exec($"INSERT INTO \"{t}\" (Id,CarBodyId,{col},IsStock,Level,Price,releaseOrder) VALUES (?,?,?,0,1,0,0)", FitId(bd, i + 1), bd, vals[i]);
+                        Exec($"INSERT INTO \"{t}\" (Id,CarBodyId,{col},IsStock,Level,Price,releaseOrder) VALUES (?,?,?,0,1,0,0)",
+                            _batchRunning ? FreeBodyUpgradeId(t, bd, slot) : FitId(bd, slot), bd, value);
+                        existing.Add(value);
+                        slot++;
                     }
                 }
-                Log("✓ tire profile offsets: " + string.Join(", ", vals), "ok");
+                Log($"✓ tire profile offsets {(_batchRunning ? "added from stock-relative deltas" : "set")}: " + string.Join(", ", vals), "ok");
             }
 
             if (OptTrack.IsChecked == true)
@@ -1226,18 +2396,54 @@ public partial class CarEditorView : UserControl
                     ("List_UpgradeCarBodyTrackSpacingFront", _ofF),
                     ("List_UpgradeCarBodyTrackSpacingRear",  _ofR) })
                 {
-                    Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
-                    int lvl = 1;
-                    foreach (var box in list)
+                    var existing = Query($"SELECT Spacing v FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd)
+                        .Select(row => Convert.ToDouble(row["v"])).ToList();
+                    var enteredSteps = list.Select(OptNum).Where(value => value.HasValue)
+                        .Select(value => Math.Round(value!.Value, 3)).ToList();
+                    var requestedSteps = enteredSteps.Distinct().ToList();
+                    if (_batchRunning)
                     {
-                        if (OptNum(box) is not double v) continue;
+                        requestedSteps = requestedSteps.Where(value => value > 0).ToList();
+                        requestedSteps.Sort();
+                    }
+                    if (!_batchRunning)
+                    {
+                        bool unchanged = existing.Select(value => Math.Round(value, 3)).OrderBy(value => value)
+                            .SequenceEqual(enteredSteps.OrderBy(value => value));
+                        if (unchanged) continue;
+                        Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
+                        existing.Clear();
+                    }
+                    double stockValue = Convert.ToDouble(Scalar($"SELECT Spacing FROM \"{t}\" WHERE CarBodyId=? AND IsStock=1 ORDER BY Id LIMIT 1", bd) ?? 0d);
+                    double batchBase = Math.Max(stockValue, existing.DefaultIfEmpty(stockValue).Max());
+                    int lvl = _batchRunning ? existing.Count + 1 : 1;
+                    foreach (double requestedValue in requestedSteps)
+                    {
+                        double v = requestedValue;
+                        if (_batchRunning)
+                        {
+                            // Treat a positive batch entry as an extension step. If
+                            // that exact step already exists between any two choices,
+                            // the request has already been applied and must not grow
+                            // the track again on a second click.
+                            double requestedStep = Math.Round(v, 3);
+                            var choices = existing.Append(stockValue).Distinct().ToList();
+                            bool stepExists = choices.Any(low => choices.Any(high =>
+                                high > low && Math.Abs(Math.Round(high - low, 3) - requestedStep) < 0.000001));
+                            if (stepExists) continue;
+                            v = batchBase + v;
+                        }
+                        v = Math.Round(v, 3);
+                        if (existing.Any(current =>
+                                Math.Abs(Math.Round(current, 3) - v) < 0.000001)) continue;
                         int level = Math.Min(lvl, 3);
                         Exec($"INSERT INTO \"{t}\" (Id,CarBodyId,Spacing,IsStock,Level,Price,releaseOrder) VALUES (?,?,?,0,?,?,0)",
-                            FitId(bd, lvl), bd, Math.Round(v, 3), level, 100 * lvl);
+                            _batchRunning ? FreeBodyUpgradeId(t, bd, lvl) : FitId(bd, lvl), bd, v, level, 100 * lvl);
+                        existing.Add(v);
                         lvl++;
                     }
                 }
-                Log($"✓ track width / offset set on {fitBodies.Length} body/bodies", "ok");
+                Log($"✓ track width / offset {(_batchRunning ? "extended from each car's widest existing value on" : "set on")} {fitBodies.Length} body/bodies", "ok");
             }
 
             if (OptWhite.IsChecked == true) ApplyWhitewalls(carId);
@@ -1246,12 +2452,25 @@ public partial class CarEditorView : UserControl
 
             if (OptLift.IsChecked == true) ApplyLiftKit(carId);
 
-            if (OptSlam.IsChecked == true) ApplySlamKit(carId);
+            if (OptSlam.IsChecked == true) ApplySlamKit(carId, driftSteeringAngle);
 
+            MarkModified(carId);
             RefreshCar();
             Log("⚙ apply complete — export when ready", "ok");
         }
         catch (Exception ex) { Log("apply error: " + ex.Message, "err"); }
+    }
+
+    bool TryGetDriftSteeringAngle(out double angle)
+    {
+        string text = DriftSteeringAngle.Text.Trim();
+        bool valid = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out angle) ||
+                     double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out angle);
+        if (valid && angle >= 0 && angle <= 180) return true;
+
+        Log("drift steering angle must be a number from 0 to 180 degrees", "warn");
+        angle = 0;
+        return false;
     }
 
     void InsertClonedRow(string table, Dictionary<string, object> row)
@@ -1613,10 +2832,10 @@ public partial class CarEditorView : UserControl
         Log($"✓ lift kit: Rally max ride height front {frontLift:0.####} · rear {rearLift:0.####}", "ok");
     }
 
-    void ApplySlamKit(long carId)
+    void ApplySlamKit(long carId, double steeringAngle)
     {
         if (!EnsureSuspensionUpgrade(carId, 5)) return;
-        var drift = Query(@"SELECT FrontSpringDamperPhysicsID f,RearSpringDamperPhysicsID r
+        var drift = Query(@"SELECT Id,FrontSpringDamperPhysicsID f,RearSpringDamperPhysicsID r
                             FROM List_UpgradeSpringDamper
                             WHERE Ordinal=? AND Level=5 AND IsStock=0
                             ORDER BY Id LIMIT 1", carId).FirstOrDefault();
@@ -1624,7 +2843,12 @@ public partial class CarEditorView : UserControl
         int changed = Exec(@"UPDATE List_SpringDamperPhysics
                              SET MinRideHeight=0.01,MaxCompressHeight=0.005
                              WHERE SpringDamperPhysicsID IN (?,?)", drift["f"], drift["r"]);
-        Log(changed == 2 ? "✓ slammed (Drift suspension lowered)" : $"slam incomplete: updated {changed} physics row(s)", changed == 2 ? "ok" : "warn");
+        Exec("UPDATE List_UpgradeSpringDamper SET SteerMaxAngle=?,SteerMaxAngleFiltered=? WHERE Id=?",
+             steeringAngle, steeringAngle, drift["Id"]);
+        Log(changed == 2
+            ? $"✓ slammed (Drift suspension lowered · steering angle {steeringAngle:0.##}°)"
+            : $"slam incomplete: updated {changed} physics row(s) · steering angle {steeringAngle:0.##}°",
+            changed == 2 ? "ok" : "warn");
     }
 
     // Give an electric car a real multi-speed gearbox (the "manual EV" effect). Gears come from the

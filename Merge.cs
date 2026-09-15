@@ -41,7 +41,7 @@ namespace FH6LocalCryptoTool;
 /// </summary>
 public enum MergeMode { AddOnly, OverlayWins }
 
-public static class Merge
+public static partial class Merge
 {
     // Tables whose rows are always taken wholesale from the overlay in AddOnly mode.
     public static readonly string[] DefaultForceOverlayTables = { "VersionInfo" };

@@ -268,7 +268,7 @@ public partial class MainWindow : Window
     {
         if (_pendingOverlay is null)
         {
-            Log("No overlay staged — drop a .sqlite or .sql onto the merge zone first.");
+            Log("No donor staged — drop a decrypted .sqlite onto the merge zone first.");
             Status("Nothing to merge.");
             return;
         }
@@ -406,14 +406,24 @@ public partial class MainWindow : Window
             Status("No base DB for merge.");
             return;
         }
-        string outPath = Path.Combine(
-            OutputDirFor(baseDb),
-            Path.GetFileNameWithoutExtension(baseDb) + ".merged.sqlite");
-
-        var mode = AddOnlyCheck.IsChecked == true ? MergeMode.AddOnly : MergeMode.OverlayWins;
-        Status($"Merging {Path.GetFileName(overlayPath)}…");
-        Log($"Merging {Path.GetFileName(overlayPath)} into {Path.GetFileName(baseDb)} …");
-        Merge.Run(baseDb, overlayPath, outPath, tables: null, log: msg => Log("    " + msg), mode: mode);
+        if (!IsSqlite(overlayPath))
+            throw new InvalidOperationException("Merge needs a decrypted donor .sqlite file.");
+        Status($"Comparing {Path.GetFileName(overlayPath)}…");
+        Log($"Previewing donor {Path.GetFileName(overlayPath)} against {Path.GetFileName(baseDb)}…");
+        var preview = Merge.PreviewMods(baseDb, overlayPath);
+        foreach (string warning in preview.Warnings) Log("    Skipped: " + warning);
+        if (preview.Tables.Count == 0)
+        {
+            Log("No selectable row differences found. Check any skipped-table warnings below.");
+            Status("No selectable changes.");
+            return;
+        }
+        var picker = new MergeSelectionWindow(preview) { Owner = this };
+        if (picker.ShowDialog() != true) { Status("Merge cancelled."); return; }
+        string outPath = UniqueMergeOutput(baseDb);
+        Status($"Merging {picker.SelectedRows.Count:n0} selected donor rows…");
+        Log($"Importing {picker.SelectedRows.Count:n0} selected rows into a new database…");
+        Merge.RunSelected(preview, picker.SelectedRows, outPath, msg => Log("    " + msg));
 
         _lastDecryptedSqlite = outPath; // chain further merges onto the result
         _pendingInput = outPath;        // stage it so Re-encrypt is ready immediately
@@ -421,6 +431,15 @@ public partial class MainWindow : Window
         StagedText.Visibility = Visibility.Visible;
         Log($"    -> {Path.GetFileName(outPath)}   (staged — click Re-encrypt, or drop another overlay to keep merging)");
         Done(outPath, "Merge complete.");
+    }
+
+    private string UniqueMergeOutput(string baseDb)
+    {
+        string dir = OutputDirFor(baseDb);
+        string stem = Path.GetFileNameWithoutExtension(baseDb) + ".modmerge." + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string path = Path.Combine(dir, stem + ".sqlite");
+        for (int n = 2; File.Exists(path); n++) path = Path.Combine(dir, stem + $"-{n}.sqlite");
+        return path;
     }
 
     // ---------- helpers ----------

@@ -10,7 +10,7 @@
     <Product>FH6 Local Crypto Tool</Product>
     <Title>FH6 Local Crypto Tool</Title>
     <Description>Decrypt and re-encrypt FH6 data files, swap saves, and edit cars in one app.</Description>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\ICO\dbtool_icon.ico</ApplicationIcon>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
@@ -36,5 +36,7 @@
     <Resource Include="Assets\Logo\FMLogo_trim.png" />
     <Resource Include="Assets\Logo\dbtool_icon.png" />
     <Resource Include="Assets\Logo\db_plain.png" />
+    <EmbeddedResource Include="Assets\Reference\gamedbRC.stock.sqlite.gz"
+                      LogicalName="FH6LocalCryptoTool.gamedbRC.stock.sqlite.gz" />
   </ItemGroup>
 </Project>

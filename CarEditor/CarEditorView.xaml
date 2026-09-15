@@ -123,6 +123,45 @@
       </Setter>
     </Style>
 
+    <!-- ===== Repeatable batch fitment step button ===== -->
+    <Style x:Key="BatchStepButton" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+      <Setter Property="Background" Value="#FF313135"/>
+      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Margin" Value="0,0,7,4"/>
+      <Setter Property="MinWidth" Value="72"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="b" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                TextElement.Foreground="{TemplateBinding Foreground}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="b" Property="BorderBrush" Value="{StaticResource Pink2}"/>
+                <Setter TargetName="b" Property="Background" Value="#FF38383D"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="b" Property="BorderBrush" Value="{StaticResource Pink}"/>
+                <Setter TargetName="b" Property="Background" Value="#66E8175D"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- ===== Pink-outlined button ===== -->
     <Style x:Key="PinkButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
       <Setter Property="Foreground" Value="{StaticResource Pink}"/>
@@ -568,7 +607,11 @@
             <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
           <Border Grid.Row="0" Style="{StaticResource CardHeadStrip}">
-            <TextBlock Style="{StaticResource CardTitle}" Text="PICK A CAR"/>
+            <Grid>
+              <TextBlock Style="{StaticResource CardTitle}" Text="PICK CARS" HorizontalAlignment="Left"/>
+              <TextBlock Text="Ctrl / Shift / Ctrl+A" Foreground="{StaticResource Faint}" FontSize="10.5"
+                         HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
           </Border>
           <Grid Grid.Row="1" Margin="12,10,12,0" HorizontalAlignment="Left">
             <ToggleButton x:Name="FilterToggle" Style="{StaticResource DropdownToggle}" Content="All types" MinWidth="170"/>
@@ -581,11 +624,15 @@
                   <CheckBox x:Name="FiltICE" Content="ICE" IsChecked="True" Margin="0,3" Checked="Filt_Changed" Unchecked="Filt_Changed"/>
                   <CheckBox x:Name="FiltEV" Content="EV" IsChecked="True" Margin="0,3" Checked="Filt_Changed" Unchecked="Filt_Changed"/>
                   <CheckBox x:Name="FiltConv" Content="EV→ICE" IsChecked="True" Margin="0,3" Checked="Filt_Changed" Unchecked="Filt_Changed"/>
-                  <CheckBox x:Name="FiltIceEv" Content="ICE→EV" IsChecked="True" Margin="0,3" Checked="Filt_Changed" Unchecked="Filt_Changed"/>
+                  <CheckBox x:Name="FiltIceEv" Content="ICE→EV" IsChecked="True" Margin="0,3" Checked="Filt_Changed" Unchecked="Filt_Changed"
+                            ToolTip="Cars originally ICE whose current Data_Car configuration is electric."/>
                   <Border Height="1" Background="{StaticResource Line}" Margin="0,7,0,5"/>
                   <CheckBox x:Name="FiltBodykit" Content="Bodykit preset only" Margin="0,3"
                             Checked="Filt_Changed" Unchecked="Filt_Changed"
                             ToolTip="Only show cars whose preset package selects a non-stock car body."/>
+                  <CheckBox x:Name="FiltModified" Content="Modified cars only" Margin="0,3"
+                            Checked="Filt_Changed" Unchecked="Filt_Changed"
+                            ToolTip="Only show car and upgrade changes versus embedded stock. BaseCost and Autoshow availability are excluded; shared engine or motor changes can still affect multiple cars."/>
                 </StackPanel>
               </Border>
             </Popup>
@@ -597,7 +644,7 @@
                        Margin="12,0,0,0" VerticalAlignment="Center"/>
           </Grid>
           <ListBox x:Name="CarList" Grid.Row="3" Style="{StaticResource DarkList}"
-                   Margin="12,10,12,0" SelectionChanged="CarList_Changed"/>
+                   Margin="12,10,12,0" SelectionMode="Extended" SelectionChanged="CarList_Changed"/>
           <Border Grid.Row="4" Margin="12,10,12,10" Background="{StaticResource Card2}"
                   BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="7" Padding="10,8">
             <TextBlock x:Name="CarInfo" FontFamily="Consolas" FontSize="12"
@@ -606,7 +653,7 @@
           <StackPanel Grid.Row="5" Margin="12,0,12,12">
             <CheckBox x:Name="OptAutoshow" Content="Available in Autoshow" IsEnabled="False"
                       Margin="0,0,0,8" Click="Autoshow_Click"
-                      ToolTip="Toggles Data_Car.NotAvailableInAutoshow for the selected car — applies instantly."/>
+                      ToolTip="Toggles Data_Car.NotAvailableInAutoshow for every selected car — applies instantly."/>
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -631,6 +678,12 @@
                       IsEnabled="False" Padding="6,5" FontSize="10.5" Margin="4,0,0,0" Click="RevertPrices_Click"
                       ToolTip="Restore every BaseCost captured when this database was loaded."/>
             </Grid>
+            <Button x:Name="RestoreCarBtn" Content="↺  Restore selected car from embedded stock DB"
+                    Style="{StaticResource GhostButton}" IsEnabled="False" Padding="6,5" FontSize="10.5"
+                    Margin="0,7,0,0" Click="RestoreCar_Click"
+                    ToolTip="Replace this car's editable rows with the bundled clean stock-reference rows. Shared engine and motor upgrades may affect other cars using the same IDs."/>
+            <TextBlock x:Name="StockReferenceStatus" Foreground="{StaticResource Dim}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,6,0,0" Text="Embedded stock reference: loading…"/>
           </StackPanel>
         </Grid>
       </Border>
@@ -672,9 +725,12 @@
                   <Button x:Name="BtnAddSwap" Grid.Column="1" Content="＋  Add as swap" Style="{StaticResource PinkFilled}" Click="AddSwap_Click" Margin="6,0,0,0"/>
                 </Grid>
                 <Grid x:Name="EngBulkRow" Margin="0,8,0,0">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <Button Grid.Column="0" Content="＋  Add all of make" Style="{StaticResource GhostButton}" Click="AddMake_Click" Margin="0,0,6,0"/>
-                  <Button Grid.Column="1" Content="＋  Add EVERY engine" Style="{StaticResource GhostButton}" Click="AddAll_Click" Margin="6,0,0,0"/>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <Button Grid.Column="0" Content="＋  Add all of make" Style="{StaticResource GhostButton}" Click="AddMake_Click" Margin="0,0,5,0"
+                          ToolTip="Add every engine from the selected make, regardless of the type and search filters."/>
+                  <Button Grid.Column="1" Content="＋  Add all of type" Style="{StaticResource GhostButton}" Click="AddType_Click" Margin="5,0"
+                          ToolTip="Add every engine matching the selected engine type (I4, I6, V6, V8, etc.), regardless of the make and search filters."/>
+                  <Button Grid.Column="2" Content="＋  Add EVERY engine" Style="{StaticResource GhostButton}" Click="AddAll_Click" Margin="5,0,0,0"/>
                 </Grid>
                 <Button x:Name="MotorBulkRow" Content="＋  Add EVERY motor as a swap option" Style="{StaticResource GhostButton}"
                         Margin="0,8,0,0" Visibility="Collapsed" Click="AddAllMotors_Click"/>
@@ -687,6 +743,61 @@
             </StackPanel>
           </Border>
 
+          <!-- POWER BUILDER (full width) -->
+          <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+            <StackPanel>
+              <Border Style="{StaticResource CardHeadStrip}"><TextBlock Style="{StaticResource CardTitle}" Text="PER-CAR POWER BUILDER"/></Border>
+              <StackPanel Margin="14,10,14,12">
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Engine to edit" VerticalAlignment="Center"/>
+                  <ComboBox Grid.Column="1" x:Name="PowerEngineTarget" Height="30" IsEnabled="False"
+                            SelectionChanged="PowerTarget_Changed"
+                            ToolTip="Choose the stock engine or any engine swap linked to this car. Boost and redline edit this engine's shared upgrade records."/>
+                </Grid>
+                <Grid Margin="0,0,0,10">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Motor to edit" VerticalAlignment="Center"/>
+                  <ComboBox Grid.Column="1" x:Name="PowerMotorTarget" Height="30" IsEnabled="False"
+                            SelectionChanged="PowerTarget_Changed"
+                            ToolTip="Choose the stock motor or any motor swap linked to this car. EV torque edits this motor's shared upgrade records."/>
+                </Grid>
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <CheckBox Grid.Column="0" x:Name="OptPowerBoost" Content="Boost drop-off scale" IsEnabled="False" VerticalAlignment="Center"
+                            ToolTip="Sets TorqueDropOffScale0 on only the selected engine's highest-Level turbo upgrade. TorqueDropOffScale1 is scaled proportionally so the row's original 0-to-1 ratio is preserved."/>
+                  <TextBox Grid.Column="1" x:Name="PowerBoostScale" Style="{StaticResource Input}" IsEnabled="False"/>
+                  <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Margin="8,0,0,0" VerticalAlignment="Center" Text="Highest turbo level · preserves ratio"/>
+                </Grid>
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <CheckBox Grid.Column="0" x:Name="OptPowerRedline" Content="Redline RPM" IsEnabled="False" VerticalAlignment="Center"
+                            ToolTip="Sets RedlineRPM on every camshaft level, capped separately by that row's TorqueCurveMaxRPM."/>
+                  <TextBox Grid.Column="1" x:Name="PowerRedline" Style="{StaticResource Input}" IsEnabled="False"/>
+                  <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Margin="8,0,0,0" VerticalAlignment="Center" Text="Capped by torque curve"/>
+                </Grid>
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <CheckBox Grid.Column="0" x:Name="OptPowerWeight" Content="Weight distribution" IsEnabled="False" VerticalAlignment="Center"
+                            ToolTip="Updates CMBackFront only on Level 2 weight-reduction rows for every body on the selected car."/>
+                  <TextBox Grid.Column="1" x:Name="PowerWeightDistribution" Style="{StaticResource Input}" IsEnabled="False"/>
+                  <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Margin="8,0,0,0" VerticalAlignment="Center" Text="0.40 or 40% · Level 2 only"/>
+                </Grid>
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <CheckBox Grid.Column="0" x:Name="OptPowerEvTorque" Content="EV max torque scale" IsEnabled="False" VerticalAlignment="Center"
+                            ToolTip="Sets the highest motor-parts upgrade to this multiplier and spaces the lower upgrade levels evenly from stock 1.0."/>
+                  <TextBox Grid.Column="1" x:Name="PowerEvTorque" Style="{StaticResource Input}" IsEnabled="False"/>
+                  <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Margin="8,0,0,0" VerticalAlignment="Center" Text="Highest upgrade multiplier"/>
+                </Grid>
+                <TextBlock Foreground="{StaticResource Dim}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,8"
+                           Text="Engine and motor upgrade records are keyed by EngineID or MotorID. The selected stock unit or swap may also be used by other cars, so its power changes can affect them too. Weight distribution remains specific to this car."/>
+                <Button x:Name="ApplyPowerBtn" Content="⚡  APPLY selected power settings" Style="{StaticResource PinkFilled}"
+                        IsEnabled="False" Height="40" Click="ApplyPower_Click"/>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
           <!-- WHEELS & FITMENT (full width) -->
           <Border Style="{StaticResource CardBorder}" Margin="0,0,0,16">
             <StackPanel>
@@ -694,22 +805,25 @@
               <StackPanel Margin="14,10,14,12">
                 <!-- Apply-to-body targets (Stock / widebody variants for the selected car) -->
                 <Grid Margin="0,0,0,10">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Apply to body" VerticalAlignment="Center"/>
                   <TabControl Grid.Column="1" x:Name="BodyTargets" Height="32" VerticalAlignment="Center"
                               Background="Transparent" BorderThickness="0" SelectionChanged="BodyTarget_Changed"/>
+                  <Button Grid.Column="2" x:Name="AddBodyKitBtn" Content="＋" Style="{StaticResource GhostButton}"
+                          IsEnabled="False" Padding="10,3" Margin="6,0,0,0" Click="AddBodyKit_Click"
+                          ToolTip="Add a new selectable bodykit level for this car. The new body starts with copies of the stock body's upgrade rows and is selected for editing."/>
                 </Grid>
                 <!-- Rim sizes -->
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <CheckBox Grid.Column="0" x:Name="OptRims" Content="Rim sizes (inch)" IsChecked="True" VerticalAlignment="Top" Margin="0,4,0,0"
-                            ToolTip="Shared front and rear wheel diameters in inches. Press + to add more. Blank boxes are skipped."/>
+                            ToolTip="Single-car mode uses absolute diameters. Batch mode shows −1 and +1 preset buttons based on each car's stock front/rear size."/>
                   <StackPanel Grid.Column="1">
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="72"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="front + rear" VerticalAlignment="Center"/>
                       <WrapPanel Grid.Column="1" x:Name="RFBoxes"/>
-                      <Button Grid.Column="2" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddRF" ToolTip="Add a shared rim-size box"/>
+                      <Button Grid.Column="2" x:Name="AddRFBtn" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddRF" ToolTip="Add a shared rim-size box"/>
                     </Grid>
                   </StackPanel>
                 </Grid>
@@ -717,19 +831,19 @@
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <CheckBox Grid.Column="0" x:Name="OptWidth" Content="Tire widths (mm)" IsChecked="True" VerticalAlignment="Top" Margin="0,4,0,0"
-                            ToolTip="Absolute tread width in mm. Press + to add as many as you need per axle (up to 99). Blank boxes are skipped."/>
+                            ToolTip="Single-car mode uses absolute tread widths. Batch mode shows −10 and +10 mm preset buttons for each axle."/>
                   <StackPanel Grid.Column="1">
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="front" VerticalAlignment="Center"/>
                       <WrapPanel Grid.Column="1" x:Name="WFBoxes"/>
-                      <Button Grid.Column="2" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddWF" ToolTip="Add a front tire-width box"/>
+                      <Button Grid.Column="2" x:Name="AddWFBtn" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddWF" ToolTip="Add a front tire-width box"/>
                     </Grid>
                     <Grid Margin="0,5,0,0">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="rear" VerticalAlignment="Center"/>
                       <WrapPanel Grid.Column="1" x:Name="WRBoxes"/>
-                      <Button Grid.Column="2" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddWR" ToolTip="Add a rear tire-width box"/>
+                      <Button Grid.Column="2" x:Name="AddWRBtn" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddWR" ToolTip="Add a rear tire-width box"/>
                     </Grid>
                   </StackPanel>
                 </Grid>
@@ -737,9 +851,9 @@
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <CheckBox Grid.Column="0" x:Name="OptAspect" Content="Tire profile (sidewall)" IsChecked="True" VerticalAlignment="Top" Margin="0,4,0,0"
-                            ToolTip="Aspect-ratio offset. Negative = lower profile. Applied to front and rear. Press + to add as many as you need (up to 99)."/>
+                            ToolTip="Single-car mode uses absolute profile offsets. Batch mode shows −2 and +2 preset buttons applied to front and rear."/>
                   <WrapPanel Grid.Column="1" x:Name="SWBoxes" VerticalAlignment="Center"/>
-                  <Button Grid.Column="2" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" VerticalAlignment="Top" Click="AddSW" ToolTip="Add a profile box"/>
+                  <Button Grid.Column="2" x:Name="AddSWBtn" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" VerticalAlignment="Top" Click="AddSW" ToolTip="Add a profile box"/>
                 </Grid>
                 <!-- Track width / offset (m): front / rear, press + to add more per axle -->
                 <Grid Margin="0,0,0,2">
@@ -749,19 +863,19 @@
                              FontSize="11.5" Margin="40,0,0,8" Visibility="Collapsed"
                              Text="Example offsets:  0.03  •  0.05  •  0.08  (start small)"/>
                   <CheckBox Grid.Row="1" Grid.Column="0" x:Name="OptTrack" Content="Track width / offset" IsChecked="True" VerticalAlignment="Top" Margin="0,4,0,0"
-                            ToolTip="Track-spacer offset in metres. Press + to add as many as you need per axle (up to 99). Blank boxes are skipped."/>
+                            ToolTip="Single-car mode uses absolute offsets in metres. Batch mode shows a +0.02 m preset measured from each axle's widest existing upgrade."/>
                   <StackPanel Grid.Row="1" Grid.Column="1">
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="front" VerticalAlignment="Center"/>
                       <WrapPanel Grid.Column="1" x:Name="OFBoxes"/>
-                      <Button Grid.Column="2" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddOF" ToolTip="Add a front offset box"/>
+                      <Button Grid.Column="2" x:Name="AddOFBtn" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddOF" ToolTip="Add a front offset box"/>
                     </Grid>
                     <Grid Margin="0,5,0,0">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="rear" VerticalAlignment="Center"/>
                       <WrapPanel Grid.Column="1" x:Name="ORBoxes"/>
-                      <Button Grid.Column="2" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddOR" ToolTip="Add a rear offset box"/>
+                      <Button Grid.Column="2" x:Name="AddORBtn" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" Click="AddOR" ToolTip="Add a rear offset box"/>
                     </Grid>
                   </StackPanel>
                 </Grid>
@@ -804,7 +918,18 @@
                   <TextBlock Style="{StaticResource Hint}"
                              Text="Adds Street, Sport, Semi-Slick, Rally, Slick, Offroad, Snow and Drag variants using the game's _FE tire models."/>
                   <CheckBox x:Name="OptSlam" Content="Slam it — drift suspension" IsChecked="True" Margin="0,10,0,0"
-                            ToolTip="Adds a Drift suspension from the car's stock suspension when missing, then lowers its ride-height range."/>
+                            ToolTip="Adds a Drift suspension from the car's stock suspension when missing, lowers its ride-height range, and applies the steering angle below."/>
+                  <Grid Margin="20,6,0,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="90"/>
+                      <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Steering angle" Foreground="{StaticResource Dim}" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox x:Name="DriftSteeringAngle" Grid.Column="1" Style="{StaticResource Input}" Text="50.0"
+                             ToolTip="Degrees written to the Drift suspension's SteerMaxAngle and SteerMaxAngleFiltered fields when Slam it is applied."/>
+                    <TextBlock Grid.Column="2" Text="°" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                  </Grid>
                   <CheckBox x:Name="OptLift" Content="Lift kit — rally suspension" Margin="0,8,0,0"
                             ToolTip="Adds a Rally suspension from the car's stock suspension when missing, then extends its slider 0.10 m above stock maximum."/>
                 </StackPanel>
@@ -828,10 +953,10 @@
                 </Grid>
                 <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,10"
                            Text="Lotus WTA geometry plus stronger game-valid grip, lower CG, mass-scaled springs/anti-roll and increased high-speed downforce. Missing upgrades are added; revert is per car and per session."/>
-                <Button Content="⚙  APPLY changes to this car"
+                <Button x:Name="ApplyOptionsBtn" Content="⚙  APPLY changes to this car"
                         Style="{StaticResource PinkFilled}" Height="44" FontSize="13.5" Click="Apply_Click"/>
                 <TextBlock Style="{StaticResource Hint}"
-                           Text="Engine adds apply instantly. This applies the checked sections. Then Export."/>
+                           Text="Batch mode uses repeatable step buttons. Each click queues another level: rims ±1 inch, widths ±10 mm, profiles ±2, and track +0.02 m. The button count shows how many levels are queued; right-click removes the last level. Apply sorts every queued set from lowest to highest before inserting it. Only genuinely new choices are added. Single-car mode remains absolute and prefilled."/>
               </StackPanel>
             </StackPanel>
           </Border>

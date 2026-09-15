@@ -1,6 +1,6 @@
-# FH6 Local Crypto Tool
+# FH6 Local Crypto Tool v1.1.0
 
-FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding supported FH6 files, creating ProfileData save swaps, and editing vehicle data in a decrypted GameDB.
+FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding supported FH6 files, creating ProfileData save swaps, editing ProfileData through friendly and advanced views, and modifying vehicle data in a decrypted GameDB.
 
 ## Table of contents
 
@@ -15,6 +15,7 @@ FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding
 - [Section 1: Local Crypto](#section-1-local-crypto)
 - [Section 2: Car Editor](#section-2-car-editor)
 - [Section 3: Save Swap](#section-3-save-swap)
+- [Section 4: Profile Editor](#section-4-profile-editor)
 - [Troubleshooting](#troubleshooting)
 - [Advanced technical reference](#advanced-technical-reference)
 - [Video guide](#video-guide)
@@ -26,9 +27,13 @@ FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding
 - Decrypt and re-encrypt GameDB `.slt` containers.
 - Decrypt, edit, and re-encrypt supported text assets such as INI, XML, JSON, TXT, and extensionless configuration files.
 - Authenticate and extract encrypted ZIP entries.
-- Merge SQLite databases or SQL overlays into a working GameDB.
-- Edit car availability, prices, engines, motors, fitment, drivetrains, tires, suspension, and handling.
+- Selectively merge another SQLite database into the staged GameDB.
+- Select exactly which donor database tables and rows are merged into the staged database.
+- Edit car availability, prices, engines, motors, fitment, drivetrains, tires, suspension, handling, and per-engine power settings.
+- Batch-edit multiple cars with append-only, duplicate-safe upgrade creation.
+- Compare a loaded database against an embedded stock reference, filter modified cars, and restore individual cars.
 - Build ProfileData save swaps while retaining the target save's container framing and canonical account XUID.
+- Edit supported ProfileData values through a friendly Overview while retaining advanced SQLite, property-tree, Save State, Career, and XML views.
 - Create renamed output files without overwriting the input files.
 
 ## Requirements
@@ -49,15 +54,16 @@ Building the source requires Windows 10 or Windows 11 and the .NET 8 SDK.
 
 ## Start here: a beginner's guide
 
-Download `FH6LocalCryptoTool-v1.0.0-win-x64.exe` from the release assets and run it. The release is a portable application, so there is no installer.
+Download `FH6LocalCryptoTool.exe` from the release assets and run it. The release is a portable application, so there is no installer.
 
-The tool has three tabs:
+The tool has four tabs:
 
 | Tab | Use it when you want to... |
 |---|---|
 | **Local Crypto** | Decrypt or re-encrypt a GameDB or text asset, extract an encrypted ZIP, or merge database content. |
 | **Car Editor** | Change cars, upgrades, prices, fitment, tires, suspension, drivetrains, engines, motors, or handling. |
 | **Save Swap** | Move the progress payload from one `C_ProfileData` save into another save's container. |
+| **Profile Editor** | View and edit supported ProfileData values using friendly controls or advanced data views. |
 
 ![Local Crypto tab overview](Screenshots/local-crypto-overview.png)
 
@@ -306,10 +312,12 @@ If you modified several cars, remain in a completely unrelated car until fresh c
 3. Click **Load DB** and select the decrypted SQLite database.
 4. The editor creates a temporary working copy. The selected file is not edited directly.
 5. Use the search field or type filter to find a vehicle.
-6. Filters include ICE, EV, converted vehicles, and cars with bodykit presets.
+6. Filters include ICE, EV, ICE-to-EV, EV-to-ICE, bodykit presets, and cars modified relative to the embedded stock database. BaseCost and Autoshow availability are intentionally excluded from the Modified cars filter.
 7. Select a car and review its details.
 
 Changes remain in the temporary working database until **Export DB** is used.
+
+The editor carries a compressed stock GameDB reference inside the application. This enables the **Modified cars only** comparison and **Restore selected car from embedded stock DB** without asking the user to locate a separate stock database. Restoration is disabled in batch mode and for cars that do not exist in the embedded reference.
 
 ![Loaded Car Editor showing engine choices and fitment options](Screenshots/car-editor-engines-fitment.png)
 
@@ -335,7 +343,7 @@ These controls update the working copy immediately, but the database must still 
 4. Choose an action:
    - **Set as STOCK engine** replaces the stock engine. On an EV, it converts the car to combustion and fits a donor drivetrain when available.
    - **Add as swap** adds the engine as a selectable upgrade.
-   - **Add all of make** adds every engine from the chosen manufacturer.
+   - **Add all of type** adds every engine matching the selected layout, such as I4, I6, V6, or V8.
    - **Add EVERY engine** adds the full engine list after confirmation.
    - **Set as STOCK motor** converts the car to an EV with the selected motor.
    - **Add as motor option** adds the selected motor as an option.
@@ -343,6 +351,19 @@ These controls update the working copy immediately, but the database must still 
    - **Convert to Electric — highest-output motor** performs an automatic conversion using the highest-output motor in the loaded database.
 
 Engine and motor actions apply immediately to the working copy. Watch the activity log for skipped or existing entries.
+
+ICE and EV configurations are mutually exclusive. Converting to electric removes the car's combustion-engine rows, while setting a combustion engine as stock removes its motor rows and copies an appropriate donor engine/drivetrain specification.
+
+### Per-car power builder
+
+The power builder can target the selected car's stock unit or one of its added swaps:
+
+- **Boost drop-off scale** changes only the highest turbo-upgrade row for the selected EngineID and preserves the original relationship between `TorqueDropOffScale0` and `TorqueDropOffScale1`.
+- **Redline RPM** edits camshaft upgrades and is capped by each row's torque-curve maximum RPM.
+- **Weight distribution** edits only the Level 2 body-weight upgrade for the selected car.
+- **EV max torque scale** adjusts the highest motor-parts multiplier instead of applying a hidden conversion multiplier.
+
+Engine and motor upgrade tables are keyed by EngineID or MotorID. If another car uses the same unit, shared power changes can affect that car too. The editor shows this warning beside the controls.
 
 ![Motor selection and conversion controls](Screenshots/car-editor-motors-fitment.png)
 
@@ -358,6 +379,8 @@ Converted vehicles are identified in the selected-car details:
 4. Check only the sections the next Apply operation should write.
 5. Leave a box blank to skip it. Use **+** to add more boxes.
 
+The **+** beside the Stock body/Widebody tabs creates a new bodykit level for the selected car. The editor clones the stock body's dependent upgrade rows into the new body target so visual-mod creators can attach fresh parts without reusing the stock body level. Bodykit creation is intentionally unavailable in batch mode.
+
 If a car has more than one widebody upgrade, each widebody receives its own numbered tab. Treat every body tab separately and click Apply while the body you intend to edit is active. Rim sizes are the exception because the rim-size list is shared by the whole car.
 
 Available fields:
@@ -368,6 +391,19 @@ Available fields:
 - **Track width / offset:** Front and rear spacer offsets. Start small, such as `0.03`, `0.05`, or `0.08`.
 
 **Reset fitment to stock (selected body)** removes non-stock tire-width, tire-profile, and track-offset options from the active body. It does not reset the shared rim-size list.
+
+#### Multi-car batch fitment
+
+Ctrl-click or Shift-click cars in the list to enter batch mode. Bodykit creation is disabled while multiple cars are selected. Batch fitment preserves every stock and existing upgrade row and adds only genuinely new values.
+
+- Rim buttons add `−1` or `+1` inch per click from each car's stock diameter.
+- Front and rear tire-width buttons add `−10` or `+10` mm per click from each axle's stock width.
+- Tire-profile buttons add `−2` or `+2` points per click and may produce valid negative offsets.
+- Track-width buttons add `+0.02 m` per click beyond each axle's widest existing option; no smaller-track preset is provided.
+- Each button may be clicked repeatedly. Its count shows the number of queued levels, and right-click removes the most recently queued level.
+- Queued values are sorted from lowest to highest before insertion. Existing matching values are skipped, and pressing Apply again does not create duplicate upgrade rows.
+
+Batch mode also supports suspension, drivetrain, tires, engine operations, power-builder settings, Autoshow availability, and price actions where shown. Single-car mode remains prefilled and uses absolute fitment values.
 
 ### Drivetrain options
 
@@ -383,6 +419,7 @@ Check the desired items, then click **APPLY changes to this car**.
 - **Forza Edition tire set** adds FE tire models and compounds without removing current ordinary tires.
 - If both tire options are checked, the vintage set is created first and FE choices are added afterward.
 - **Slam it — drift suspension** creates a Drift suspension when missing and lowers its ride-height range.
+- **Steering angle** sets the Drift suspension steering angle; `50.0` is supplied as the starting value.
 - **Lift kit — rally suspension** creates a Rally suspension when missing and extends maximum ride height by `0.10` above stock maximum.
 
 Select the desired options and click **APPLY changes to this car**.
@@ -421,7 +458,7 @@ Use Save Swap when you want to put the progress from one FH6 save into another a
 
 The tool writes a new verified file beside your copied target. It does not overwrite either input file.
 
-> **Testing notice:** Save Swap has passed automated cryptographic and round-trip verification, but JXRDN has not personally completed an in-game save-swap test. Every other advertised V1 feature has been personally tested by JXRDN.
+> **Testing notice:** Save Swap has passed automated cryptographic/round-trip verification and has now been successfully confirmed in game by a user. Account, cloud-sync, and game-build differences still make untouched backups essential.
 
 ![Save Swap tab showing donor and target inputs](Screenshots/save-swap-overview.png)
 
@@ -495,6 +532,42 @@ The selected donor and target files remain unchanged.
 6. Confirm that the expected progress loads before continuing to play.
 7. If the game rejects the file, loads unexpected data, or cloud sync chooses the wrong version, close the game and restore the untouched target backup.
 
+## Section 4: Profile Editor
+
+Profile Editor opens an encrypted `C_ProfileData`, validates and decrypts it locally, and presents both everyday controls and advanced data views. Export creates a new encrypted result; the loaded input remains unchanged.
+
+### Overview
+
+The Overview is designed for everyday players and labels values in plain language when the save exposes a recognized, safely editable layout. Depending on the save, it can include:
+
+- Credits, driver level, and driver XP.
+- Unspent and lifetime skill points.
+- Current Season Progress points and separate Playlist History points.
+- Playlist reward level, last checkpoint, and claimed-reward count.
+- Horizon Collection and world-progress summaries.
+- Character items owned, barn-find totals, car-experience unlocks, and festival-site status.
+
+Current Season points use a guarded serializer-layout signature discovered through controlled before/after save comparisons. If a save layout is not recognized, the editor refuses to guess and leaves the value untouched. Editing points does not automatically complete challenges, claim rewards, or rewrite event history.
+
+### Advanced views
+
+Advanced users retain direct access to the underlying profile structures:
+
+- **Cars & Data** browses and edits supported embedded SQLite tables.
+- **Profile Values** exposes the searchable property tree with friendly paths.
+- **Save State** and **Career** expose parsed records and their advanced XML representation.
+- XML editors include syntax highlighting while preserving the original advanced editing workflow.
+
+Advanced edits can make a profile invalid even when the encrypted container rebuilds successfully. Change one area at a time and keep an untouched save backup outside the live save directory.
+
+### Export a profile edit
+
+1. Close the game and copy the active `C_ProfileData` into a separate working folder.
+2. Load the copied file in Profile Editor.
+3. Make and review the desired edits.
+4. Export to a new encrypted file and read the verification result.
+5. Keep the original backup, then install and rename the exported copy only when ready to test.
+
 ## Troubleshooting
 
 ### A change does not appear in game
@@ -537,28 +610,27 @@ The sections above cover normal use. The details below are intended for users wh
 - **Stock body:** The car's standard body configuration.
 - **Widebody:** A separate upgraded body configuration with its own compatible fitment rows.
 
-### Save Swap internals and V1 scope
+### Save Swap internals
 
 Save Swap decrypts and validates both encrypted inputs in memory. It takes the donor's complete progress payload, structurally identifies the target profile's canonical account XUID, writes that one account value into the donor payload, and rebuilds the result using the target save's outer container framing.
 
 Other creator, tune, livery, downloaded-content, and incidental identity records inside the donor data are left unchanged. The converted payload is compressed and encrypted with the target template, then decrypted again to verify both the rebuilt payload and canonical account identity before output is accepted.
 
-V1 is a focused save-swap builder, not a full profile editor. It expects encrypted `C_ProfileData` files for both donor and target. It does not expose manual editing of XUID, BXML, scalar, seasonal, or embedded SQLite fields. It does not identify gamertags, contact Xbox services, or require Xbox authorization; processing happens locally.
+Save Swap is separate from the Profile Editor. It expects encrypted `C_ProfileData` files for both donor and target and does not expose manual account-identity changes. The application does not identify gamertags, contact Xbox services, or require Xbox authorization; processing happens locally.
 
 Save compatibility can still depend on the game build and the data inside each profile. Successful cryptographic verification proves that the container round-tripped correctly, but cannot guarantee that every donor payload is compatible with every target account or game version.
 
-### Merge a database or SQL overlay
+### Merge another database
 
 1. Decrypt a GameDB or drag a base `.sqlite` onto the main Local Crypto drop area.
-2. Drag the overlay `.sqlite` or `.sql` onto the smaller merge area.
-3. Choose the merge behavior:
-   - Leave **Add only — never overwrite my rows** checked to retain existing base rows and add only new overlay rows.
-   - Uncheck it when the overlay should replace matching base rows as well as add new rows.
-4. Click **Merge**.
-5. The output is named `<base-name>.merged.sqlite`.
-6. The merged database is staged automatically. Drop another overlay to continue, or click **Re-encrypt** when finished.
+2. Drag another modded or updated `.sqlite` onto the smaller merge area.
+3. Click **Merge** to open the themed selection window.
+4. Expand the table tree and select only the donor tables or individual changed rows you want.
+5. Review conflicts before confirming. Selected donor rows overwrite matching staged rows; unselected data remains exactly as it was in the staged database.
+6. New selected rows and selected donor-only tables are added. Rows and tables that are not selected are not imported.
+7. The output is named `<base-name>.merged.sqlite` and is staged automatically for another merge or re-encryption.
 
-Keep a backup before using replacement mode. Database relationships can make an unsuitable overlay appear valid while still causing problems in game.
+The staged database always remains the base. The donor never replaces it wholesale. Keep backups: relationally valid rows can still be incompatible with another mod or game build.
 
 ### Build from source
 
@@ -581,7 +653,7 @@ FH6 Local Crypto Tool is an unofficial project and is not affiliated with or end
 ## Credits
 
 - JXRDN — Project creator, feature direction, UI design, research, and extensive in-game testing.
-- Draff — Original Botan-based cryptography work, technical research, reference material, and save-swap guidance. (Made this tool possible)
+- Draff — Original Botan-based cryptography work, technical research, reference material, save-swap guidance, and now the newly added save editor.
 - The Botan Project — Cryptographic library and runtime used by the application.
 - Smidge — Provided the reference database and schema examples that helped make additional upgrade options possible.
 - Stalin — Identified and helped correct text-asset round-trip requirements
