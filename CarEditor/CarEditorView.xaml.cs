@@ -351,7 +351,8 @@ public partial class CarEditorView : UserControl
                                        "Drift/Rally suspension, drivetrain, tires, engines and selected power settings.\n\n" +
                                        "Each preset click queues another rim, tire-width or profile step from every car's stock value. " +
                                        "Each track click queues another 0.02 m extension from the widest existing value. Existing rows are preserved, " +
-                                       "and unchanged values are not added twice. " +
+                                       "new choices are stored lowest-to-highest, and unchanged values are not added twice. " +
+                                       "A car's stock value remains available in game but is not duplicated as an upgrade row. " +
                                        "Bodykit creation and bodykit targets are excluded.",
                                        "Confirm batch edit", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
@@ -385,7 +386,7 @@ public partial class CarEditorView : UserControl
         {
             string directory = Path.Combine(Path.GetTempPath(), "FH6LocalCryptoTool");
             Directory.CreateDirectory(directory);
-            _stockReferencePath = Path.Combine(directory, $"gamedbRC.stock.v1.1.1.{Environment.ProcessId}.sqlite");
+            _stockReferencePath = Path.Combine(directory, $"gamedbRC.stock.v1.1.2.{Environment.ProcessId}.sqlite");
 
             using Stream packed = Assembly.GetExecutingAssembly().GetManifestResourceStream(StockReferenceResource)
                 ?? throw new InvalidOperationException("the embedded stock database resource is missing");
@@ -990,6 +991,7 @@ public partial class CarEditorView : UserControl
         finally { _updatingPowerTargets = false; }
         SetPowerField(OptPowerBoost, PowerBoostScale, false, "");
         SetPowerField(OptPowerRedline, PowerRedline, false, "");
+        SetPowerField(OptPowerEngineMass, PowerEngineMass, false, "");
         SetPowerField(OptPowerWeight, PowerWeightDistribution, false, "");
         SetPowerField(OptPowerEvTorque, PowerEvTorque, false, "");
         ApplyPowerBtn.IsEnabled = false;
@@ -1072,6 +1074,7 @@ public partial class CarEditorView : UserControl
         finally { _updatingPowerTargets = false; }
         SetPowerField(OptPowerBoost, PowerBoostScale, boost, "");
         SetPowerField(OptPowerRedline, PowerRedline, redline, "");
+        SetPowerField(OptPowerEngineMass, PowerEngineMass, false, "");
         SetPowerField(OptPowerWeight, PowerWeightDistribution, weight, "");
         SetPowerField(OptPowerEvTorque, PowerEvTorque, ev, "");
         ApplyPowerBtn.IsEnabled = boost || redline || weight || ev;
@@ -1085,11 +1088,12 @@ public partial class CarEditorView : UserControl
         long? engineId = SelectedPowerEngineId();
         long? motorId = SelectedPowerMotorId();
 
-        object boost = null, redline = null, evScale = null;
+        object boost = null, redline = null, engineMass = null, evScale = null;
         if (engineId.HasValue)
         {
             boost = HighestTurboScaleTarget(engineId.Value)?.Scale0;
             redline = Scalar("SELECT RedlineRPM FROM List_UpgradeEngineCamshaft WHERE EngineID=? ORDER BY Level DESC,Id DESC LIMIT 1", engineId.Value);
+            engineMass = Scalar("SELECT \"EngineMass-kg\" FROM Data_Engine WHERE EngineID=?", engineId.Value);
         }
         if (motorId.HasValue)
             evScale = Scalar("SELECT MAX(TorqueScale) FROM List_UpgradeMotorParts WHERE MotorID=? AND IsStock=0", motorId.Value);
@@ -1103,12 +1107,13 @@ public partial class CarEditorView : UserControl
         {
             SetPowerField(OptPowerBoost, PowerBoostScale, boost != null, PowerText(boost, "0.####"));
             SetPowerField(OptPowerRedline, PowerRedline, redline != null, PowerText(redline, "0"));
+            SetPowerField(OptPowerEngineMass, PowerEngineMass, engineMass != null, PowerText(engineMass, "0.###"));
         }
         if (weightField)
             SetPowerField(OptPowerWeight, PowerWeightDistribution, weight != null, PowerText(weight, "0.####"));
         if (motor)
             SetPowerField(OptPowerEvTorque, PowerEvTorque, evScale != null, PowerText(evScale, "0.####"));
-        ApplyPowerBtn.IsEnabled = OptPowerBoost.IsEnabled || OptPowerRedline.IsEnabled ||
+        ApplyPowerBtn.IsEnabled = OptPowerBoost.IsEnabled || OptPowerRedline.IsEnabled || OptPowerEngineMass.IsEnabled ||
                                   OptPowerWeight.IsEnabled || OptPowerEvTorque.IsEnabled;
     }
 
@@ -1157,14 +1162,16 @@ public partial class CarEditorView : UserControl
         if (batchCars.Count > 1) { ApplyBatchPowerBuilder(batchCars); return; }
         bool doBoost = OptPowerBoost.IsChecked == true;
         bool doRedline = OptPowerRedline.IsChecked == true;
+        bool doEngineMass = OptPowerEngineMass.IsChecked == true;
         bool doWeight = OptPowerWeight.IsChecked == true;
         bool doEv = OptPowerEvTorque.IsChecked == true;
-        if (!doBoost && !doRedline && !doWeight && !doEv)
+        if (!doBoost && !doRedline && !doEngineMass && !doWeight && !doEv)
         { Log("select at least one power-builder setting", "warn"); return; }
 
-        double boostScale = 0, redlineRpm = 0, weightDistribution = 0, evMaxScale = 0;
+        double boostScale = 0, redlineRpm = 0, engineMass = 0, weightDistribution = 0, evMaxScale = 0;
         if (doBoost && !TryPowerNumber(PowerBoostScale, "boost scale", 0.01, 100, out boostScale)) return;
         if (doRedline && !TryPowerNumber(PowerRedline, "redline", 500, 30000, out redlineRpm)) return;
+        if (doEngineMass && !TryPowerNumber(PowerEngineMass, "engine mass", 0, 5000, out engineMass)) return;
         if (doWeight)
         {
             if (!TryPowerNumber(PowerWeightDistribution, "weight distribution", 0, 100, out weightDistribution)) return;
@@ -1177,7 +1184,7 @@ public partial class CarEditorView : UserControl
         long carId = _car.Id;
         long? engineId = SelectedPowerEngineId();
         long? motorId = SelectedPowerMotorId();
-        if ((doBoost || doRedline) && (!engineId.HasValue ||
+        if ((doBoost || doRedline || doEngineMass) && (!engineId.HasValue ||
             (ScalarL("SELECT COUNT(*) FROM List_UpgradeEngine WHERE Ordinal=? AND EngineID=?", carId, engineId.Value) ?? 0) == 0))
         { Log("choose an engine currently linked to this car", "warn"); return; }
         if (doEv && (!motorId.HasValue ||
@@ -1211,6 +1218,13 @@ public partial class CarEditorView : UserControl
                 }
                 foreach (long id in CarsUsingEngine(engineId.Value)) affectedCars.Add(id);
                 Log($"redline requested {redlineRpm:0} RPM across {rows} camshaft row(s){(capped > 0 ? $" · {capped} capped by TorqueCurveMaxRPM" : "")}", rows > 0 ? "ok" : "warn");
+            }
+
+            if (doEngineMass)
+            {
+                int rows = Exec("UPDATE Data_Engine SET \"EngineMass-kg\"=? WHERE EngineID=?", engineMass, engineId.Value);
+                foreach (long id in CarsUsingEngine(engineId.Value)) affectedCars.Add(id);
+                Log($"engine mass set to {engineMass:0.###} kg for EngineID {engineId.Value}", rows > 0 ? "ok" : "warn");
             }
 
             if (doWeight)
@@ -1901,15 +1915,15 @@ public partial class CarEditorView : UserControl
         bool widebody = BodyTargets.SelectedItem is TabItem selected &&
                         !string.Equals(selected.Header?.ToString(), "Stock body", StringComparison.OrdinalIgnoreCase);
         TrackExampleText.Visibility = widebody ? Visibility.Visible : Visibility.Collapsed;
-        // Id is the display order. Several valid extra rows deliberately share
-        // the same terminal Level, so ordering by Level loses their real order.
-        FillDyn(WFBoxes, _wf, "SELECT FrontTireWidth v FROM List_UpgradeCarBodyTireWidthFront WHERE CarBodyId=? AND IsStock=0 ORDER BY Id", "0", body);
-        FillDyn(WRBoxes, _wr, "SELECT RearTireWidth v FROM List_UpgradeCarBodyTireWidthRear WHERE CarBodyId=? AND IsStock=0 ORDER BY Id", "0", body);
-        FillDyn(SWBoxes, _sw, "SELECT FrontTireAspectRatioOffset v FROM List_UpgradeCarBodyTireAspectRatioFront WHERE CarBodyId=? AND IsStock=0 ORDER BY Id", "0.##", body);
+        // Value-first ordering keeps the editor readable even for a database
+        // created by an older build whose generated row IDs were appended.
+        FillDyn(WFBoxes, _wf, "SELECT FrontTireWidth v FROM List_UpgradeCarBodyTireWidthFront WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0", body);
+        FillDyn(WRBoxes, _wr, "SELECT RearTireWidth v FROM List_UpgradeCarBodyTireWidthRear WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0", body);
+        FillDyn(SWBoxes, _sw, "SELECT FrontTireAspectRatioOffset v FROM List_UpgradeCarBodyTireAspectRatioFront WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.##", body);
         // New widebodies have no non-stock rows, so these begin blank. Once Apply
         // creates custom offsets, switching back to the tab reads them from the DB.
-        FillDyn(OFBoxes, _ofF, "SELECT Spacing v FROM List_UpgradeCarBodyTrackSpacingFront WHERE CarBodyId=? AND IsStock=0 ORDER BY Id", "0.###", body);
-        FillDyn(ORBoxes, _ofR, "SELECT Spacing v FROM List_UpgradeCarBodyTrackSpacingRear WHERE CarBodyId=? AND IsStock=0 ORDER BY Id", "0.###", body);
+        FillDyn(OFBoxes, _ofF, "SELECT Spacing v FROM List_UpgradeCarBodyTrackSpacingFront WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.###", body);
+        FillDyn(ORBoxes, _ofR, "SELECT Spacing v FROM List_UpgradeCarBodyTrackSpacingRear WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.###", body);
     }
     void PopulateFitmentFields()
     {
@@ -1991,6 +2005,45 @@ public partial class CarEditorView : UserControl
     // ============================================================ operations
     long NextId(string table, long carId) => (ScalarL($"SELECT MAX(Id) FROM \"{table}\" WHERE Id>=? AND Id<?", carId * 1000, carId * 1000 + 1000) ?? carId * 1000) + 1;
     long NextLevel(string table, string keyCol, long keyVal) => (ScalarL($"SELECT MAX(Level) FROM \"{table}\" WHERE \"{keyCol}\"=?", keyVal) ?? 0) + 1;
+
+    // Upgrade menus use Id as their stable row order. Batch additions can be
+    // smaller than native choices, so merely appending them puts the values out
+    // of order. Reassign the existing non-stock Id set to the same rows in value
+    // order. No rows or stock IDs are removed, and these leaf tables declare no
+    // foreign keys to their Id columns.
+    void SortUpgradeRowsByValue(string table, string ownerColumn, long ownerId, string valueColumn)
+    {
+        var rows = Query($"SELECT Id,{valueColumn} v FROM \"{table}\" WHERE \"{ownerColumn}\"=? AND IsStock=0 ORDER BY {valueColumn},Id", ownerId);
+        if (rows.Count < 2) return;
+
+        var targetIds = rows.Select(row => Convert.ToInt64(row["Id"])).OrderBy(id => id).ToList();
+        if (rows.Select(row => Convert.ToInt64(row["Id"])).SequenceEqual(targetIds)) return;
+
+        const string savepoint = "sort_fitment_rows";
+        try
+        {
+            Exec("SAVEPOINT " + savepoint);
+            var temporaryIds = new List<long>(rows.Count);
+            long candidate = long.MinValue + 1024;
+            foreach (var row in rows)
+            {
+                while ((ScalarL($"SELECT COUNT(*) FROM \"{table}\" WHERE Id=?", candidate) ?? 0) != 0)
+                    candidate++;
+                temporaryIds.Add(candidate);
+                Exec($"UPDATE \"{table}\" SET Id=? WHERE Id=?", candidate, row["Id"]);
+                candidate++;
+            }
+            for (int i = 0; i < rows.Count; i++)
+                Exec($"UPDATE \"{table}\" SET Id=? WHERE Id=?", targetIds[i], temporaryIds[i]);
+            Exec("RELEASE " + savepoint);
+        }
+        catch
+        {
+            try { Exec("ROLLBACK TO " + savepoint); Exec("RELEASE " + savepoint); } catch { }
+            throw;
+        }
+    }
+
     long EngManuf(long eid) => ScalarL("SELECT ManufacturerID FROM List_UpgradeEngine WHERE EngineID=? AND IsStock=1 LIMIT 1", eid) ?? 0;
     string EngName(long eid) => _engines.FirstOrDefault(x => x.Id == eid)?.Name ?? ("#" + eid);
 
@@ -2275,7 +2328,10 @@ public partial class CarEditorView : UserControl
                         // A second Apply with the same single-car values is a true
                         // no-op. Do not churn IDs or recreate identical menu tiles.
                         if (existingRows.Count == diameters.Count && existing.SetEquals(diameters))
+                        {
+                            SortUpgradeRowsByValue(t, "Ordinal", carId, col);
                             continue;
+                        }
                         Exec($"DELETE FROM \"{t}\" WHERE Ordinal=? AND IsStock=0", carId);
                         existing.Clear();
                     }
@@ -2289,6 +2345,7 @@ public partial class CarEditorView : UserControl
                             carId, level, dia, 50, Math.Round(1.36 * (dia - (stock ?? dia)), 2));
                         slot++;
                     }
+                    SortUpgradeRowsByValue(t, "Ordinal", carId, col);
                 }
                 string sizes = string.Join(", ", _rf.Select(OptNum).Where(v => v.HasValue).Select(v => Math.Round(v!.Value)));
                 Log($"✓ shared front/rear rim sizes {(_batchRunning ? "added from stock-relative deltas" : "set")}: [{sizes}]", "ok");
@@ -2307,12 +2364,9 @@ public partial class CarEditorView : UserControl
                     ("List_UpgradeCarBodyTireWidthRear",  "RearTireWidth",  _wr) })
                 {
                     var oldLevels = Query($"SELECT {col} v, Level FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0 ORDER BY Id", bd);
-                    int levelNineCount = oldLevels.Count(r => Convert.ToInt64(r["Level"]) == 9);
-                    int nativeCount = levelNineCount > 1
-                        ? oldLevels.FindIndex(r => Convert.ToInt64(r["Level"]) == 9)
-                        : oldLevels.Count;
-                    long terminalLevel = nativeCount > 0
-                        ? oldLevels.Take(nativeCount).Max(r => Convert.ToInt64(r["Level"]))
+                    int preservedLevelCount = oldLevels.Count;
+                    long terminalLevel = preservedLevelCount > 0
+                        ? oldLevels.Max(r => Convert.ToInt64(r["Level"]))
                         : 3;
                     var existingRows = oldLevels.Select(row => Convert.ToInt64(row["v"])).ToList();
                     var existing = existingRows.ToHashSet();
@@ -2327,7 +2381,10 @@ public partial class CarEditorView : UserControl
                     {
                         var requested = requestedWidths.ToHashSet();
                         if (existingRows.Count == requested.Count && existing.SetEquals(requested))
+                        {
+                            SortUpgradeRowsByValue(t, "CarBodyId", bd, col);
                             continue;
+                        }
                         Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
                         existing.Clear();
                     }
@@ -2337,15 +2394,16 @@ public partial class CarEditorView : UserControl
                     {
                         if (!existing.Add(width)) continue;
                         long level = !_batchRunning
-                            ? (slot <= nativeCount
+                            ? (slot <= preservedLevelCount
                                 ? Convert.ToInt64(oldLevels[slot - 1]["Level"])
-                                : (nativeCount == 0 && slot <= 3 ? slot : terminalLevel))
+                                : (preservedLevelCount == 0 && slot <= 3 ? slot : terminalLevel))
                             : (oldLevels.Count == 0 ? Math.Min(++firstAdded, 3) : terminalLevel);
                         Exec($"INSERT INTO \"{t}\" (Id,CarBodyId,Level,IsStock,{col},Price,MassDiff,DragScale,WindInstabilityScale,RequiresGraphics,releaseOrder) VALUES (?,?,?,0,?,?,?,1,1,0,0)",
                             _batchRunning ? FreeBodyUpgradeId(t, bd, slot) : FitId(bd, slot),
                             bd, level, width, 2000 + 200 * slot, Math.Round(0.54 * slot, 2));
                         slot++;
                     }
+                    SortUpgradeRowsByValue(t, "CarBodyId", bd, col);
                 }
                 Log($"✓ tire widths {(_batchRunning ? "added from stock-relative deltas to" : "set on")} {fitBodies.Length} body/bodies", "ok");
             }
@@ -2367,7 +2425,11 @@ public partial class CarEditorView : UserControl
                     {
                         bool unchanged = existing.Select(value => Math.Round(value, 2)).OrderBy(value => value)
                             .SequenceEqual(enteredValues.OrderBy(value => value));
-                        if (unchanged) continue;
+                        if (unchanged)
+                        {
+                            SortUpgradeRowsByValue(t, "CarBodyId", bd, col);
+                            continue;
+                        }
                         Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
                         existing.Clear();
                     }
@@ -2383,6 +2445,7 @@ public partial class CarEditorView : UserControl
                         existing.Add(value);
                         slot++;
                     }
+                    SortUpgradeRowsByValue(t, "CarBodyId", bd, col);
                 }
                 Log($"✓ tire profile offsets {(_batchRunning ? "added from stock-relative deltas" : "set")}: " + string.Join(", ", vals), "ok");
             }
@@ -2410,7 +2473,11 @@ public partial class CarEditorView : UserControl
                     {
                         bool unchanged = existing.Select(value => Math.Round(value, 3)).OrderBy(value => value)
                             .SequenceEqual(enteredSteps.OrderBy(value => value));
-                        if (unchanged) continue;
+                        if (unchanged)
+                        {
+                            SortUpgradeRowsByValue(t, "CarBodyId", bd, "Spacing");
+                            continue;
+                        }
                         Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
                         existing.Clear();
                     }
@@ -2421,18 +2488,7 @@ public partial class CarEditorView : UserControl
                     {
                         double v = requestedValue;
                         if (_batchRunning)
-                        {
-                            // Treat a positive batch entry as an extension step. If
-                            // that exact step already exists between any two choices,
-                            // the request has already been applied and must not grow
-                            // the track again on a second click.
-                            double requestedStep = Math.Round(v, 3);
-                            var choices = existing.Append(stockValue).Distinct().ToList();
-                            bool stepExists = choices.Any(low => choices.Any(high =>
-                                high > low && Math.Abs(Math.Round(high - low, 3) - requestedStep) < 0.000001));
-                            if (stepExists) continue;
                             v = batchBase + v;
-                        }
                         v = Math.Round(v, 3);
                         if (existing.Any(current =>
                                 Math.Abs(Math.Round(current, 3) - v) < 0.000001)) continue;
@@ -2442,6 +2498,7 @@ public partial class CarEditorView : UserControl
                         existing.Add(v);
                         lvl++;
                     }
+                    SortUpgradeRowsByValue(t, "CarBodyId", bd, "Spacing");
                 }
                 Log($"✓ track width / offset {(_batchRunning ? "extended from each car's widest existing value on" : "set on")} {fitBodies.Length} body/bodies", "ok");
             }

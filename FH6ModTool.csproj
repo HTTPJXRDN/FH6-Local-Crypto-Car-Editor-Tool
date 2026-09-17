@@ -10,7 +10,7 @@
     <Product>FH6 Local Crypto Tool</Product>
     <Title>FH6 Local Crypto Tool</Title>
     <Description>Decrypt and re-encrypt FH6 data files, swap saves, and edit cars in one app.</Description>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\ICO\dbtool_icon.ico</ApplicationIcon>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>

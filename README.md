@@ -1,4 +1,4 @@
-# FH6 Local Crypto Tool v1.1.1
+# FH6 Local Crypto Tool v1.1.2
 
 FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding supported FH6 files, creating ProfileData save swaps, editing ProfileData through friendly and advanced views, and modifying vehicle data in a decrypted GameDB.
 
@@ -280,9 +280,7 @@ The current interface decrypts and extracts supported ZIP entries. It does not r
 - **Open folder when done** opens the completed output's location.
 - **Clear log** clears only the on-screen activity history.
 
-The activity log confirms each staged, decrypted, re-encrypted, or extracted file:
-
-![Successful GameDB, text asset, and ZIP operations in the Local Crypto activity log](Screenshots/local-crypto-round-trip-log.png)
+The activity log confirms each staged, decrypted, re-encrypted, or extracted file.
 
 ## Section 2: Car Editor
 
@@ -319,11 +317,11 @@ Changes remain in the temporary working database until **Export DB** is used.
 
 The editor carries a compressed stock GameDB reference inside the application. This enables the **Modified cars only** comparison and **Restore selected car from embedded stock DB** without asking the user to locate a separate stock database. Restoration is disabled in batch mode and for cars that do not exist in the embedded reference.
 
-![Loaded Car Editor showing engine choices and fitment options](Screenshots/car-editor-engines-fitment.png)
+The selected-car summary shows its powertrain, available engine options, fitment basics, Autoshow state, and stock-restore control:
 
-The type filter can narrow the list to bodykit presets or specific powertrain types:
+![Selected-car details, Autoshow controls, and embedded-stock restore](Screenshots/car-editor-selected-car-details.png)
 
-![Car type and bodykit preset filters](Screenshots/car-filter-bodykits.png)
+The type filter can narrow the list to bodykit presets or specific powertrain types.
 
 ### Autoshow and global prices
 
@@ -360,16 +358,13 @@ The power builder can target the selected car's stock unit or one of its added s
 
 - **Boost drop-off scale** changes only the highest turbo-upgrade row for the selected EngineID and preserves the original relationship between `TorqueDropOffScale0` and `TorqueDropOffScale1`.
 - **Redline RPM** edits camshaft upgrades and is capped by each row's torque-curve maximum RPM.
+- **Engine mass (kg)** edits the selected stock engine or swap's shared `Data_Engine.[EngineMass-kg]` value. It is intentionally unavailable in batch mode.
 - **Weight distribution** edits only the Level 2 body-weight upgrade for the selected car.
 - **EV max torque scale** adjusts the highest motor-parts multiplier instead of applying a hidden conversion multiplier.
 
-Engine and motor upgrade tables are keyed by EngineID or MotorID. If another car uses the same unit, shared power changes can affect that car too. The editor shows this warning beside the controls.
+Engine mass and engine/motor upgrade tables are keyed by EngineID or MotorID. If another car uses the same unit, shared changes can affect that car too. The editor shows this warning beside the controls.
 
-![Motor selection and conversion controls](Screenshots/car-editor-motors-fitment.png)
-
-Converted vehicles are identified in the selected-car details:
-
-![Selected-car details for a converted EV-to-ICE vehicle](Screenshots/converted-car-details.png)
+![Per-car power builder with selected-engine mass editing](Screenshots/car-editor-power-builder.png)
 
 ### Wheels and fitment
 
@@ -401,7 +396,8 @@ Ctrl-click or Shift-click cars in the list to enter batch mode. Bodykit creation
 - Tire-profile buttons add `−2` or `+2` points per click and may produce valid negative offsets.
 - Track-width buttons add `+0.02 m` per click beyond each axle's widest existing option; no smaller-track preset is provided.
 - Each button may be clicked repeatedly. Its count shows the number of queued levels, and right-click removes the most recently queued level.
-- Queued values are sorted from lowest to highest before insertion. Existing matching values are skipped, and pressing Apply again does not create duplicate upgrade rows.
+- Queued values are stored from lowest to highest, including their database row ordering. Track choices advance in exact `0.02 m` steps from one fixed starting point.
+- Existing matching values are skipped, and pressing Apply again does not create duplicate upgrade rows. Stock values remain available in game and are not duplicated as upgrade rows, so the editor can show one intentional gap at the stock value.
 
 Batch mode also supports suspension, drivetrain, tires, engine operations, power-builder settings, Autoshow availability, and price actions where shown. Single-car mode remains prefilled and uses absolute fitment values.
 
@@ -425,6 +421,8 @@ Check the desired items, then click **APPLY changes to this car**.
 Select the desired options and click **APPLY changes to this car**.
 
 Before pressing Apply, review every checkbox in this section. A checked suspension or tire option is included even if you were mainly editing a different section.
+
+![Drivetrain, tire, stance, enhanced-handling, and Apply controls](Screenshots/car-editor-drivetrain-stance-apply.png)
 
 ### Enhanced handling
 
@@ -536,6 +534,8 @@ The selected donor and target files remain unchanged.
 
 Profile Editor opens an encrypted `C_ProfileData`, validates and decrypts it locally, and presents both everyday controls and advanced data views. Export creates a new encrypted result; the loaded input remains unchanged.
 
+![Profile Editor Overview with save summary and everyday controls](Screenshots/profile-editor-overview.png)
+
 ### Overview
 
 The Overview is designed for everyday players and labels values in plain language when the save exposes a recognized, safely editable layout. Depending on the save, it can include:
@@ -548,6 +548,18 @@ The Overview is designed for everyday players and labels values in plain languag
 - Character items owned, barn-find totals, car-experience unlocks, and festival-site status.
 
 Current Season points use a guarded serializer-layout signature discovered through controlled before/after save comparisons. If a save layout is not recognized, the editor refuses to guess and leaves the value untouched. Editing points does not automatically complete challenges, claim rewards, or rewrite event history.
+
+Everyday progression values use plain-language labels and individual Apply buttons:
+
+![Credits, driver level, XP, and skill-point controls](Screenshots/profile-editor-everyday-values.png)
+
+Festival Playlist controls keep Current Season points separate from lifetime Playlist History progress:
+
+![Current Season and Playlist History point controls](Screenshots/profile-editor-playlist.png)
+
+Recognized Horizon Collection categories are shown as separate progress values:
+
+![Horizon Collection progress controls](Screenshots/profile-editor-collection-progress.png)
 
 ### Advanced views
 
@@ -632,6 +644,8 @@ Save compatibility can still depend on the game build and the data inside each p
 6. Review conflicts and base-only counts before confirming. Base-only rows are removed only from tables explicitly marked **Replace whole table**.
 7. Sparse patch databases containing only selected tables or rows should use **Merge rows**, never whole-table replacement.
 8. The output is named `<base-name>.modmerge.<timestamp>.sqlite` and is staged automatically for another merge or re-encryption.
+
+![Mod Merge table and row selection window](Screenshots/mod-merge-selection.png)
 
 The staged database remains the base, and neither source file is overwritten. Whole-table rebuilds preserve the donor table definition, keys, row IDs, indexes, and triggers, then verify the copied contents and SQLite integrity. Keep backups: structurally valid rows can still be incompatible with another mod or game build.
 

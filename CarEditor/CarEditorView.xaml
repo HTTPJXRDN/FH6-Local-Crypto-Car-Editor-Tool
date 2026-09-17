@@ -778,6 +778,13 @@
                 </Grid>
                 <Grid Margin="0,8,0,0">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <CheckBox Grid.Column="0" x:Name="OptPowerEngineMass" Content="Engine mass (kg)" IsEnabled="False" VerticalAlignment="Center"
+                            ToolTip="Sets EngineMass-kg on the selected EngineID. This is the engine's shared base mass, not the per-car swap-row MassDiff."/>
+                  <TextBox Grid.Column="1" x:Name="PowerEngineMass" Style="{StaticResource Input}" IsEnabled="False"/>
+                  <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Margin="8,0,0,0" VerticalAlignment="Center" Text="Selected EngineID · shared base mass"/>
+                </Grid>
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <CheckBox Grid.Column="0" x:Name="OptPowerWeight" Content="Weight distribution" IsEnabled="False" VerticalAlignment="Center"
                             ToolTip="Updates CMBackFront only on Level 2 weight-reduction rows for every body on the selected car."/>
                   <TextBox Grid.Column="1" x:Name="PowerWeightDistribution" Style="{StaticResource Input}" IsEnabled="False"/>
@@ -791,7 +798,7 @@
                   <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Margin="8,0,0,0" VerticalAlignment="Center" Text="Highest upgrade multiplier"/>
                 </Grid>
                 <TextBlock Foreground="{StaticResource Dim}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,8"
-                           Text="Engine and motor upgrade records are keyed by EngineID or MotorID. The selected stock unit or swap may also be used by other cars, so its power changes can affect them too. Weight distribution remains specific to this car."/>
+                           Text="Engine mass and engine/motor upgrade records are keyed by EngineID or MotorID. The selected stock unit or swap may also be used by other cars, so these changes can affect them too. Weight distribution remains specific to this car."/>
                 <Button x:Name="ApplyPowerBtn" Content="⚡  APPLY selected power settings" Style="{StaticResource PinkFilled}"
                         IsEnabled="False" Height="40" Click="ApplyPower_Click"/>
               </StackPanel>
@@ -956,7 +963,7 @@
                 <Button x:Name="ApplyOptionsBtn" Content="⚙  APPLY changes to this car"
                         Style="{StaticResource PinkFilled}" Height="44" FontSize="13.5" Click="Apply_Click"/>
                 <TextBlock Style="{StaticResource Hint}"
-                           Text="Batch mode uses repeatable step buttons. Each click queues another level: rims ±1 inch, widths ±10 mm, profiles ±2, and track +0.02 m. The button count shows how many levels are queued; right-click removes the last level. Apply sorts every queued set from lowest to highest before inserting it. Only genuinely new choices are added. Single-car mode remains absolute and prefilled."/>
+                           Text="Batch mode uses repeatable step buttons. Each click queues another level: rims ±1 inch, widths ±10 mm, profiles ±2, and track +0.02 m. The button count shows how many levels are queued; right-click removes the last level. Apply stores every set from lowest to highest and adds only genuinely new choices. Stock values remain available in game and are not duplicated as upgrade rows, so one stock-sized gap in the displayed upgrade list is expected. Single-car mode remains absolute and prefilled."/>
               </StackPanel>
             </StackPanel>
           </Border>
