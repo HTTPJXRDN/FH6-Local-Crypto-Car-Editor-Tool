@@ -13,11 +13,14 @@ public partial class MergeSelectionWindow : Window
     private const int PageSize = 200;
     private readonly ModMergePreview _preview;
     private readonly HashSet<ModMergeRow> _selected = new();
+    private readonly HashSet<ModMergeTable> _replaceTables = new();
     private readonly Dictionary<ModMergeTable, CheckBox> _tableChecks = new();
+    private readonly Dictionary<ModMergeTable, CheckBox> _replaceChecks = new();
     private readonly Dictionary<ModMergeRow, CheckBox> _rowChecks = new();
     private bool _refreshing;
 
     public IReadOnlyCollection<ModMergeRow> SelectedRows => _selected.ToArray();
+    public IReadOnlyCollection<string> ReplacementTables => _replaceTables.Select(table => table.Name).ToArray();
 
     public MergeSelectionWindow(ModMergePreview preview)
     {
@@ -37,14 +40,18 @@ public partial class MergeSelectionWindow : Window
         string term = TableFilter.Text.Trim();
         TableTree.Items.Clear();
         _tableChecks.Clear();
+        _replaceChecks.Clear();
         _rowChecks.Clear();
         foreach (var table in _preview.Tables.Where(t =>
                      t.Name.Contains(term, StringComparison.OrdinalIgnoreCase)))
         {
             var check = new CheckBox
             {
-                Content = $"{table.Name}  ({table.AddedCount} new, {table.ConflictCount} replace)" +
+                Content = $"Merge rows — {table.Name}  ({table.AddedCount} new, {table.ConflictCount} changed, " +
+                          $"{table.BaseOnlyCount} base-only)" +
                           (table.IsNew ? "  [new table]" : ""),
+                ToolTip = "Select every new or changed donor row. Base-only rows remain. " +
+                          "Use 'Replace whole table' when old rows must be removed.",
                 FontSize = 13,
                 FontWeight = FontWeights.SemiBold,
                 Margin = new Thickness(3, 4, 0, 4),
@@ -58,7 +65,34 @@ public partial class MergeSelectionWindow : Window
                     if (select) _selected.Add(row); else _selected.Remove(row);
                 RefreshChecks();
             };
-            var item = new TreeViewItem { Header = check, Tag = table };
+            var exact = new CheckBox
+            {
+                Content = "Replace whole table (drop + rebuild)",
+                ToolTip = $"Drop this staged table, recreate the donor schema, and copy all {table.DonorRowCount:n0} donor rows. " +
+                          "Use this only when the donor intentionally defines the complete table.",
+                Foreground = (Brush)FindResource("Pink"),
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(18, 4, 3, 4),
+                IsChecked = _replaceTables.Contains(table)
+            };
+            exact.Checked += (_, _) =>
+            {
+                if (_refreshing) return;
+                _replaceTables.Add(table);
+                foreach (var row in table.Rows) _selected.Remove(row);
+                RefreshChecks();
+            };
+            exact.Unchecked += (_, _) =>
+            {
+                if (_refreshing) return;
+                _replaceTables.Remove(table);
+                RefreshChecks();
+            };
+            var header = new DockPanel { LastChildFill = true };
+            DockPanel.SetDock(exact, Dock.Right);
+            header.Children.Add(exact);
+            header.Children.Add(check);
+            var item = new TreeViewItem { Header = header, Tag = table };
             item.Items.Add(new TreeViewItem { Header = "Loading rows..." });
             item.Expanded += (_, _) =>
             {
@@ -70,6 +104,7 @@ public partial class MergeSelectionWindow : Window
                 }
             };
             _tableChecks[table] = check;
+            _replaceChecks[table] = exact;
             TableTree.Items.Add(item);
         }
         RefreshChecks();
@@ -90,6 +125,7 @@ public partial class MergeSelectionWindow : Window
                 ToolTip = row.ChangedColumns.Length == 0 ? row.Label :
                     $"{row.Label}\nChanged columns: {string.Join(", ", row.ChangedColumns)}",
                 IsChecked = _selected.Contains(row),
+                IsEnabled = !_replaceTables.Contains(table),
                 Margin = new Thickness(2, 2, 0, 2)
             };
             check.Checked += (_, _) => { if (!_refreshing) { _selected.Add(row); RefreshChecks(); } };
@@ -122,8 +158,14 @@ public partial class MergeSelectionWindow : Window
         {
             int count = table.Rows.Count(_selected.Contains);
             check.IsChecked = count == 0 ? false : count == table.Rows.Count ? true : null;
+            check.IsEnabled = !_replaceTables.Contains(table) && table.Rows.Count > 0;
         }
-        foreach (var (row, check) in _rowChecks) check.IsChecked = _selected.Contains(row);
+        foreach (var (table, check) in _replaceChecks) check.IsChecked = _replaceTables.Contains(table);
+        foreach (var (row, check) in _rowChecks)
+        {
+            check.IsChecked = _selected.Contains(row);
+            check.IsEnabled = !_replaceTables.Any(table => table.Name == row.Table);
+        }
         _refreshing = false;
         UpdateCount();
     }
@@ -131,8 +173,9 @@ public partial class MergeSelectionWindow : Window
     private void UpdateCount()
     {
         SelectionText.Text = $"{_selected.Count:n0} row(s) selected across " +
-                             $"{_selected.Select(r => r.Table).Distinct().Count():n0} table(s)";
-        ApplyButton.IsEnabled = _selected.Count > 0;
+                             $"{_selected.Select(r => r.Table).Distinct().Count():n0} table(s)  ·  " +
+                             $"{_replaceTables.Count:n0} whole-table rebuild(s)";
+        ApplyButton.IsEnabled = _selected.Count > 0 || _replaceTables.Count > 0;
     }
 
     private void TableFilter_TextChanged(object sender, TextChangedEventArgs e)
@@ -144,7 +187,12 @@ public partial class MergeSelectionWindow : Window
         foreach (var row in _preview.Tables.SelectMany(t => t.Rows).Where(r => !r.IsConflict)) _selected.Add(row);
         RefreshChecks();
     }
-    private void Clear_Click(object sender, RoutedEventArgs e) { _selected.Clear(); RefreshChecks(); }
+    private void Clear_Click(object sender, RoutedEventArgs e)
+    {
+        _selected.Clear();
+        _replaceTables.Clear();
+        RefreshChecks();
+    }
     private void Apply_Click(object sender, RoutedEventArgs e) { DialogResult = true; Close(); }
     private void Cancel_Click(object sender, RoutedEventArgs e) { DialogResult = false; Close(); }
     private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;

@@ -252,7 +252,7 @@
                 </Grid.RowDefinitions>
                 <StackPanel Grid.Row="0">
                     <TextBlock Text="Choose changes to import" FontSize="21" FontWeight="SemiBold"/>
-                    <TextBlock Text="Your database stays unchanged. Checked donor rows go into a new merged database."
+                    <TextBlock Text="Your database stays unchanged. Selected donor changes go into a new merged database."
                                Foreground="{StaticResource Dim}" Margin="0,7,0,0" TextWrapping="Wrap"/>
                     <TextBlock x:Name="SourceText" Foreground="{StaticResource Dim}" Margin="0,5,0,0"
                                TextTrimming="CharacterEllipsis"/>
@@ -261,7 +261,8 @@
                         BorderThickness="1" CornerRadius="10" Padding="13" Margin="0,16,0,14">
                     <TextBlock TextWrapping="Wrap" Foreground="#FFD0D0D4" FontSize="12">
                         Expand a table to pick individual rows. "New" inserts a row; "Replace" overwrites only that matching row.
-                        Related parts may live in other tables, so select their rows too. Tables without a primary key are add-by-content only.
+                        "Replace whole table" drops the staged table, recreates the donor schema, then copies the complete donor table.
+                        Use exact replacement only when the donor intentionally defines the whole table. Related parts may live in other tables.
                     </TextBlock>
                 </Border>
                 <Grid Grid.Row="2" Margin="0,0,0,10">

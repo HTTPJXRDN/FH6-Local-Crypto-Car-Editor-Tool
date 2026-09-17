@@ -30,7 +30,7 @@ public sealed class ModMergeRow
 public sealed class ModMergeTable
 {
     internal ModMergeTable(string name, bool isNew, string[] columns, string[] primaryKey, bool hasRowid,
-                           List<ModMergeRow> rows)
+                           List<ModMergeRow> rows, int donorRowCount, int baseOnlyCount)
     {
         Name = name;
         IsNew = isNew;
@@ -38,6 +38,8 @@ public sealed class ModMergeTable
         PrimaryKey = primaryKey;
         HasRowid = hasRowid;
         Rows = rows;
+        DonorRowCount = donorRowCount;
+        BaseOnlyCount = baseOnlyCount;
     }
     public string Name { get; }
     public bool IsNew { get; }
@@ -45,6 +47,8 @@ public sealed class ModMergeTable
     public string[] PrimaryKey { get; }
     public bool HasRowid { get; }
     public IReadOnlyList<ModMergeRow> Rows { get; }
+    public int DonorRowCount { get; }
+    public int BaseOnlyCount { get; }
     public int AddedCount => Rows.Count(r => !r.IsConflict);
     public int ConflictCount => Rows.Count(r => r.IsConflict);
 }
@@ -119,8 +123,11 @@ public static partial class Merge
             try
             {
                 var rows = PreviewTableRows(con, table, baseColumns, overlayKey, isNew, hasRowid);
-                if (rows.Count > 0)
-                    tables.Add(new ModMergeTable(table, isNew, baseColumns.ToArray(), overlayKey.ToArray(), hasRowid, rows));
+                int donorRowCount = CountRows(con, "ov", table);
+                int baseOnlyCount = isNew ? 0 : CountBaseOnlyRows(con, table, baseColumns, overlayKey);
+                if (rows.Count > 0 || baseOnlyCount > 0)
+                    tables.Add(new ModMergeTable(table, isNew, baseColumns.ToArray(), overlayKey.ToArray(),
+                        hasRowid, rows, donorRowCount, baseOnlyCount));
             }
             catch (SqliteException ex)
             {
@@ -129,6 +136,25 @@ public static partial class Merge
         }
         Exec(con, "DETACH DATABASE ov;");
         return new ModMergePreview(basePath, overlayPath, baseHash, overlayHash, tables, warnings);
+    }
+
+    private static int CountRows(SqliteConnection con, string schema, string table)
+    {
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM {schema}.{Q(table)};";
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    private static int CountBaseOnlyRows(SqliteConnection con, string table,
+        List<string> columns, List<string> key)
+    {
+        string equality = key.Count > 0
+            ? string.Join(" AND ", key.Select(c => $"o.{Q(c)} IS b.{Q(c)}"))
+            : string.Join(" AND ", columns.Select(c => $"o.{Q(c)} IS b.{Q(c)}"));
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM main.{Q(table)} b " +
+                          $"WHERE NOT EXISTS (SELECT 1 FROM ov.{Q(table)} o WHERE {equality});";
+        return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
     private static List<ModMergeRow> PreviewTableRows(SqliteConnection con, string table,
@@ -203,12 +229,22 @@ public static partial class Merge
 
     public static int RunSelected(ModMergePreview preview, IEnumerable<ModMergeRow> selectedRows,
                                   string outSqlite, Action<string>? log = null)
+        => RunSelected(preview, selectedRows, Array.Empty<string>(), outSqlite, log);
+
+    public static int RunSelected(ModMergePreview preview, IEnumerable<ModMergeRow> selectedRows,
+                                  IEnumerable<string> replaceTables, string outSqlite,
+                                  Action<string>? log = null)
     {
         var selected = selectedRows.Distinct().ToList();
-        if (selected.Count == 0) throw new InvalidOperationException("Select at least one donor row.");
+        var replacementNames = new HashSet<string>(replaceTables, StringComparer.OrdinalIgnoreCase);
+        if (selected.Count == 0 && replacementNames.Count == 0)
+            throw new InvalidOperationException("Select at least one donor row or table replacement.");
         var known = preview.Tables.SelectMany(t => t.Rows).ToHashSet();
         if (selected.Any(r => !known.Contains(r)))
             throw new InvalidOperationException("A selected row does not belong to this preview.");
+        var knownTables = preview.Tables.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (replacementNames.Any(name => !knownTables.Contains(name)))
+            throw new InvalidOperationException("A replacement table does not belong to this preview.");
         string output = Path.GetFullPath(outSqlite);
         if (File.Exists(output) || string.Equals(output, preview.BasePath, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(output, preview.OverlayPath, StringComparison.OrdinalIgnoreCase))
@@ -218,6 +254,7 @@ public static partial class Merge
 
         string partial = output + ".partial." + Guid.NewGuid().ToString("N");
         int written = 0;
+        int removed = 0;
         try
         {
             // SQLite backup captures a consistent snapshot, including committed WAL pages.
@@ -233,11 +270,27 @@ public static partial class Merge
             {
                 con.Open();
                 Exec(con, "PRAGMA foreign_keys=OFF;");
+                using (var foreignKeys = con.CreateCommand())
+                {
+                    foreignKeys.CommandText = "PRAGMA foreign_keys;";
+                    if (Convert.ToInt32(foreignKeys.ExecuteScalar()) != 0)
+                        throw new InvalidOperationException("Could not disable SQLite foreign-key enforcement for table replacement.");
+                }
                 Exec(con, $"ATTACH DATABASE '{SqlPath(preview.OverlayPath)}' AS ov;");
                 using (var tx = con.BeginTransaction())
                 {
                     foreach (var table in preview.Tables)
                     {
+                        if (replacementNames.Contains(table.Name))
+                        {
+                            var rebuilt = RebuildTableFromDonor(con, tx, table);
+                            written += rebuilt.Written;
+                            removed += rebuilt.Removed;
+                            log?.Invoke($"{table.Name}: dropped and rebuilt from donor schema, " +
+                                        $"{rebuilt.Written:n0} donor row(s) copied");
+                            continue;
+                        }
+
                         var chosen = selected.Where(r => r.Table == table.Name).ToList();
                         if (chosen.Count == 0) continue;
                         if (table.IsNew)
@@ -248,15 +301,20 @@ public static partial class Merge
                         }
                         foreach (var row in chosen) written += ApplySelectedRow(con, tx, table, row);
                         if (table.IsNew)
+                        {
                             foreach (string indexSql in ObjectSqls(con, "ov", "index", table.Name))
                                 Exec(con, indexSql, tx);
+                            foreach (string triggerSql in ObjectSqls(con, "ov", "trigger", table.Name))
+                                Exec(con, triggerSql, tx);
+                        }
                         log?.Invoke($"{table.Name}: {chosen.Count} selected, {written} total row(s) written");
                     }
                     tx.Commit();
                     using var check = con.CreateCommand(); check.CommandText = "PRAGMA quick_check;";
                     if (!string.Equals(Convert.ToString(check.ExecuteScalar()), "ok", StringComparison.OrdinalIgnoreCase))
                         throw new InvalidDataException("The merged SQLite database did not pass quick_check.");
-                    log?.Invoke($"selected mod merge complete: {written} row(s) written");
+                    log?.Invoke($"selected mod merge complete: {written:n0} row(s) written" +
+                                (removed > 0 ? $", {removed:n0} old row(s) removed by rebuilt replacements" : ""));
                 }
                 Exec(con, "DETACH DATABASE ov;");
             }
@@ -268,6 +326,66 @@ public static partial class Merge
             if (File.Exists(partial)) File.Delete(partial);
             SqliteConnection.ClearAllPools();
         }
+    }
+
+    private static (int Written, int Removed) RebuildTableFromDonor(
+        SqliteConnection con, SqliteTransaction tx, ModMergeTable table)
+    {
+        string createSql = ObjectSql(con, "ov", "table", table.Name)
+            ?? throw new InvalidDataException($"Missing donor schema for {table.Name}.");
+        int removed = 0;
+        if (!table.IsNew)
+        {
+            using (var count = con.CreateCommand())
+            {
+                count.Transaction = tx;
+                count.CommandText = $"SELECT COUNT(*) FROM main.{Q(table.Name)};";
+                removed = Convert.ToInt32(count.ExecuteScalar());
+            }
+            Exec(con, $"DROP TABLE main.{Q(table.Name)};", tx);
+        }
+
+        // Recreate from the donor's CREATE TABLE statement so column constraints,
+        // primary keys, WITHOUT ROWID/STRICT flags, and defaults all match it.
+        Exec(con, createSql, tx);
+        string columns = string.Join(",", table.Columns.Select(Q));
+        bool copyRowId = table.HasRowid && !table.Columns.Any(c =>
+            c.Equals("rowid", StringComparison.OrdinalIgnoreCase) ||
+            c.Equals("oid", StringComparison.OrdinalIgnoreCase) ||
+            c.Equals("_rowid_", StringComparison.OrdinalIgnoreCase));
+        string copiedColumns = copyRowId ? $"rowid,{columns}" : columns;
+        int written;
+        using (var insert = con.CreateCommand())
+        {
+            insert.Transaction = tx;
+            insert.CommandText = $"INSERT INTO main.{Q(table.Name)} ({copiedColumns}) " +
+                                 $"SELECT {copiedColumns} FROM ov.{Q(table.Name)};";
+            written = insert.ExecuteNonQuery();
+        }
+
+        // Build these after the data copy. This preserves the donor schema without
+        // firing donor triggers while the existing rows are being restored.
+        foreach (string indexSql in ObjectSqls(con, "ov", "index", table.Name))
+            Exec(con, indexSql, tx);
+        foreach (string triggerSql in ObjectSqls(con, "ov", "trigger", table.Name))
+            Exec(con, triggerSql, tx);
+
+        using (var verify = con.CreateCommand())
+        {
+            verify.Transaction = tx;
+            verify.CommandText = $"SELECT " +
+                $"(SELECT COUNT(*) FROM main.{Q(table.Name)})," +
+                $"(SELECT COUNT(*) FROM ov.{Q(table.Name)})," +
+                $"EXISTS(SELECT 1 FROM (SELECT {copiedColumns} FROM main.{Q(table.Name)} " +
+                    $"EXCEPT SELECT {copiedColumns} FROM ov.{Q(table.Name)}) LIMIT 1)," +
+                $"EXISTS(SELECT 1 FROM (SELECT {copiedColumns} FROM ov.{Q(table.Name)} " +
+                    $"EXCEPT SELECT {copiedColumns} FROM main.{Q(table.Name)}) LIMIT 1);";
+            using var reader = verify.ExecuteReader();
+            if (!reader.Read() || reader.GetInt64(0) != reader.GetInt64(1) ||
+                reader.GetInt64(2) != 0 || reader.GetInt64(3) != 0)
+                throw new InvalidDataException($"Exact replacement verification failed for {table.Name}.");
+        }
+        return (written, removed);
     }
 
     private static int ApplySelectedRow(SqliteConnection con, SqliteTransaction tx, ModMergeTable table, ModMergeRow row)

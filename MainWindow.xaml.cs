@@ -421,9 +421,12 @@ public partial class MainWindow : Window
         var picker = new MergeSelectionWindow(preview) { Owner = this };
         if (picker.ShowDialog() != true) { Status("Merge cancelled."); return; }
         string outPath = UniqueMergeOutput(baseDb);
-        Status($"Merging {picker.SelectedRows.Count:n0} selected donor rows…");
-        Log($"Importing {picker.SelectedRows.Count:n0} selected rows into a new database…");
-        Merge.RunSelected(preview, picker.SelectedRows, outPath, msg => Log("    " + msg));
+        Status($"Merging {picker.SelectedRows.Count:n0} selected donor rows and " +
+               $"{picker.ReplacementTables.Count:n0} whole-table rebuild(s)…");
+        Log($"Importing {picker.SelectedRows.Count:n0} selected rows and " +
+            $"{picker.ReplacementTables.Count:n0} whole-table rebuild(s) into a new database…");
+        Merge.RunSelected(preview, picker.SelectedRows, picker.ReplacementTables, outPath,
+            msg => Log("    " + msg));
 
         _lastDecryptedSqlite = outPath; // chain further merges onto the result
         _pendingInput = outPath;        // stage it so Re-encrypt is ready immediately

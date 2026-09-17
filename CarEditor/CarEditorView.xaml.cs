@@ -385,7 +385,7 @@ public partial class CarEditorView : UserControl
         {
             string directory = Path.Combine(Path.GetTempPath(), "FH6LocalCryptoTool");
             Directory.CreateDirectory(directory);
-            _stockReferencePath = Path.Combine(directory, $"gamedbRC.stock.v1.1.0.{Environment.ProcessId}.sqlite");
+            _stockReferencePath = Path.Combine(directory, $"gamedbRC.stock.v1.1.1.{Environment.ProcessId}.sqlite");
 
             using Stream packed = Assembly.GetExecutingAssembly().GetManifestResourceStream(StockReferenceResource)
                 ?? throw new InvalidOperationException("the embedded stock database resource is missing");

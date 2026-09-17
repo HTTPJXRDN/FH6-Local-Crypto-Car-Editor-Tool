@@ -1,4 +1,4 @@
-# FH6 Local Crypto Tool v1.1.0
+# FH6 Local Crypto Tool v1.1.1
 
 FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding supported FH6 files, creating ProfileData save swaps, editing ProfileData through friendly and advanced views, and modifying vehicle data in a decrypted GameDB.
 
@@ -625,12 +625,15 @@ Save compatibility can still depend on the game build and the data inside each p
 1. Decrypt a GameDB or drag a base `.sqlite` onto the main Local Crypto drop area.
 2. Drag another modded or updated `.sqlite` onto the smaller merge area.
 3. Click **Merge** to open the themed selection window.
-4. Expand the table tree and select only the donor tables or individual changed rows you want.
-5. Review conflicts before confirming. Selected donor rows overwrite matching staged rows; unselected data remains exactly as it was in the staged database.
-6. New selected rows and selected donor-only tables are added. Rows and tables that are not selected are not imported.
-7. The output is named `<base-name>.merged.sqlite` and is staged automatically for another merge or re-encryption.
+4. Each listed table offers two different actions:
+   - **Merge rows** selects new or changed donor rows. Matching rows are updated, new rows are added, and base-only rows remain.
+   - **Replace whole table (drop + rebuild)** removes the staged table, recreates it from the donor schema, and copies the complete donor table. Use this only when the donor intentionally defines that entire table.
+5. Expand a table to choose individual rows, or use **Merge rows** to select all displayed row changes in that table.
+6. Review conflicts and base-only counts before confirming. Base-only rows are removed only from tables explicitly marked **Replace whole table**.
+7. Sparse patch databases containing only selected tables or rows should use **Merge rows**, never whole-table replacement.
+8. The output is named `<base-name>.modmerge.<timestamp>.sqlite` and is staged automatically for another merge or re-encryption.
 
-The staged database always remains the base. The donor never replaces it wholesale. Keep backups: relationally valid rows can still be incompatible with another mod or game build.
+The staged database remains the base, and neither source file is overwritten. Whole-table rebuilds preserve the donor table definition, keys, row IDs, indexes, and triggers, then verify the copied contents and SQLite integrity. Keep backups: structurally valid rows can still be incompatible with another mod or game build.
 
 ### Build from source
 
