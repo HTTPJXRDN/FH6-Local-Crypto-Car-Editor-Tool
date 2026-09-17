@@ -534,9 +534,9 @@ The selected donor and target files remain unchanged.
 
 Profile Editor opens an encrypted `C_ProfileData`, validates and decrypts it locally, and presents both everyday controls and advanced data views. Export creates a new encrypted result; the loaded input remains unchanged.
 
-![Profile Editor Overview with save summary and everyday controls](Screenshots/profile-editor-overview.png)
-
 ### Overview
+
+![Profile Editor Overview with save summary and everyday controls](Screenshots/profile-editor-overview-v1.1.2.png)
 
 The Overview is designed for everyday players and labels values in plain language when the save exposes a recognized, safely editable layout. Depending on the save, it can include:
 
