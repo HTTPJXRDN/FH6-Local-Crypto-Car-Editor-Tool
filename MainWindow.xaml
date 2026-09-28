@@ -3,8 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ce="clr-namespace:FH6CarEditor"
         xmlns:pe="clr-namespace:FH6ProfileEditor"
+        xmlns:anim="clr-namespace:FH6AnimationSwap"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="FH6 Local Crypto Tool" Height="840" Width="1000"
+        Title="FH6 Local Mod Tool" Height="840" Width="1080"
         MinHeight="520" MinWidth="560"
         Background="#FF1D1D1F"
         Icon="/Assets/ICO/dbtool_icon.ico"
@@ -433,6 +434,8 @@
 
         <Border Grid.Row="0" Height="34" Background="#FF161618">
           <Grid>
+            <TextBlock Text="FH6 Local Mod Tool" Foreground="{StaticResource Dim}"
+                       FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" Margin="16,0,0,0"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
               <Button Style="{StaticResource CaptionButton}" Content="&#xE921;"
                       ToolTip="Minimize" Click="MinimizeButton_Click"/>
@@ -446,7 +449,7 @@
         <Border Grid.Row="1" Height="2" Background="{StaticResource PinkAccentLine}"/>
 
     <TabControl Grid.Row="2" Background="{StaticResource AppGrad}" BorderThickness="0">
-      <TabItem Header="Local Crypto">
+      <TabItem Header="Crypto">
     <Grid Margin="24,18,24,16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -470,7 +473,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" VerticalAlignment="Center">
                 <TextBlock FontSize="22" FontWeight="Bold">
-                    <Run Text="FH6" Foreground="{StaticResource Pink}"/><Run Text=" Local Crypto Tool"/>
+                    <Run Text="Local" Foreground="{StaticResource Pink}"/><Run Text=" Crypto Tool"/>
                 </TextBlock>
                 <TextBlock Text="Drag a file onto a zone below. No commands needed."
                            Foreground="{StaticResource Dim}" FontSize="12" Margin="0,3,0,0"/>
@@ -524,6 +527,12 @@
                         <Ellipse Width="5" Height="5" Fill="{StaticResource Pink}" VerticalAlignment="Center" Margin="0,0,7,0"/>
                         <TextBlock Foreground="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center">
                             <Run Text="asset" Foreground="{StaticResource Ink}"/><Run Text="  ↔  decrypt/re-encrypt text assets — .ini, AnimResourceConfig… (General key)"/>
+                        </TextBlock>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,0">
+                        <Ellipse Width="5" Height="5" Fill="{StaticResource Pink}" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                        <TextBlock Foreground="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center">
+                            <Run Text=".skeld" Foreground="{StaticResource Ink}"/><Run Text="  ↔  decode/rebuild skeleton JSON (no encryption key)"/>
                         </TextBlock>
                     </StackPanel>
                     <TextBlock x:Name="StagedText" Visibility="Collapsed" HorizontalAlignment="Center"
@@ -588,7 +597,7 @@
         </Grid>
 
         <!-- ===== Merge zone ===== -->
-        <Border x:Name="MergeBorder" Grid.Row="5" Height="92" Margin="0,16,0,0"
+        <Border x:Name="MergeBorder" Grid.Row="5" Height="118" Margin="0,16,0,0"
                 Style="{StaticResource PremiumCard}" AllowDrop="True"
                 DragEnter="Drop_DragEnter" DragOver="Drop_DragOver"
                 DragLeave="Drop_DragLeave" Drop="Merge_Drop">
@@ -609,11 +618,15 @@
                     </TextBlock>
                     <TextBlock x:Name="MergeStagedText" Visibility="Collapsed" Foreground="{StaticResource Pink}"
                                FontSize="12.5" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Text="You choose every table and row before it is copied."
+                    <TextBlock Text="General Merge keeps its table/row picker. Widebody import copies one donor car's kit rows."
                                Foreground="{StaticResource Dim}" FontSize="12.5" Margin="0,6,0,0"/>
                 </StackPanel>
-                <Button Grid.Column="2" Content="Merge" Style="{StaticResource PinkButton}" MinWidth="104"
-                        VerticalAlignment="Center" Click="Merge_Click"/>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <Button Content="Merge" Style="{StaticResource PinkButton}" MinWidth="145"
+                            Click="Merge_Click"/>
+                    <Button x:Name="WidebodyMergeBtn" Content="Import widebody car" Style="{StaticResource PinkButton}" MinWidth="145"
+                            Margin="0,7,0,0" Click="WidebodyMerge_Click"/>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -673,6 +686,12 @@
         </Border>
     </Grid>
       </TabItem>
+      <TabItem Header="Car Editor">
+        <ce:CarEditorView/>
+      </TabItem>
+      <TabItem Header="Animation Swap">
+        <anim:AnimationSwapView/>
+      </TabItem>
       <TabItem Header="Save Swap">
         <Grid Margin="28,24">
           <Grid.RowDefinitions>
@@ -683,7 +702,7 @@
                   Background="{StaticResource CardHeadGrad}" Padding="20,11"
                   BorderBrush="{StaticResource PinkAccentLine}" BorderThickness="0,0,0,2">
             <StackPanel VerticalAlignment="Center">
-              <TextBlock FontSize="22" FontWeight="Bold"><Run Text="FH6" Foreground="{StaticResource Pink}"/><Run Text=" Save Swap"/></TextBlock>
+              <TextBlock FontSize="22" FontWeight="Bold"><Run Text="Save" Foreground="{StaticResource Pink}"/><Run Text=" Swap"/></TextBlock>
               <TextBlock Margin="0,3,0,0" Foreground="{StaticResource Dim}" FontSize="12" TextWrapping="Wrap"
                          Text="Copies donor progress while retaining the target account identity and container framing — originals are never overwritten."/>
             </StackPanel>
@@ -709,14 +728,11 @@
           </StackPanel>
         </Grid>
       </TabItem>
-      <TabItem Header="Car Editor">
-        <ce:CarEditorView/>
-      </TabItem>
       <TabItem Header="Profile Editor">
         <pe:ProfileEditorView/>
       </TabItem>
     </TabControl>
-        <TextBlock Grid.Row="2" Panel.ZIndex="20" Text="V1.1.2"
+        <TextBlock Grid.Row="2" Panel.ZIndex="20" Text="V1.2.3"
                    HorizontalAlignment="Right" VerticalAlignment="Top"
                    Margin="0,10,15,0" Foreground="{StaticResource Faint}"
                    FontSize="10.5" FontWeight="SemiBold" IsHitTestVisible="False"/>

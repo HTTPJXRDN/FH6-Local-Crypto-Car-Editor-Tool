@@ -5,12 +5,12 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>FH6LocalCryptoTool</AssemblyName>
+    <AssemblyName>FH6ModStudio</AssemblyName>
     <RootNamespace>FH6LocalCryptoTool</RootNamespace>
-    <Product>FH6 Local Crypto Tool</Product>
-    <Title>FH6 Local Crypto Tool</Title>
-    <Description>Decrypt and re-encrypt FH6 data files, swap saves, and edit cars in one app.</Description>
-    <Version>1.1.2</Version>
+    <Product>FH6 Local Mod Tool</Product>
+    <Title>FH6 Local Mod Tool</Title>
+    <Description>Edit FH6 databases, cars, animations, and profile saves in one app.</Description>
+    <Version>1.2.3</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\ICO\dbtool_icon.ico</ApplicationIcon>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
@@ -21,6 +21,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="FH6LocalCrypto.Runtime">
       <HintPath>lib\FH6LocalCrypto.Runtime.dll</HintPath>
       <Private>true</Private>
@@ -28,7 +32,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+    <Content Include="AnimationSwap\AclTools\forzatech_acl.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="forzatech_acl.dll" />
+    <Content Include="AnimationSwap\AclTools\acl_compressor.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="acl_compressor.exe" />
+    <Content Include="AnimationSwap\AclTools\LICENSE-ACL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="LICENSE-ACL.txt" />
+    <Content Include="AnimationSwap\AclTools\LICENSE-RTM.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="LICENSE-RTM.txt" />
+    <Content Include="AnimationSwap\AclTools\LICENSE-SJSON.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="LICENSE-SJSON.txt" />
   </ItemGroup>
 
   <ItemGroup>
@@ -38,5 +46,7 @@
     <Resource Include="Assets\Logo\db_plain.png" />
     <EmbeddedResource Include="Assets\Reference\gamedbRC.stock.sqlite.gz"
                       LogicalName="FH6LocalCryptoTool.gamedbRC.stock.sqlite.gz" />
+    <EmbeddedResource Include="AnimationSwap\donor_library.json" />
+    <EmbeddedResource Include="AnimationSwap\stock_baseline.json" />
   </ItemGroup>
 </Project>

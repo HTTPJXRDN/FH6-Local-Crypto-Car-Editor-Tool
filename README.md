@@ -1,6 +1,8 @@
-# FH6 Local Crypto Tool v1.1.2
+# FH6 Local Mod Tool v1.2.3
 
-FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding supported FH6 files, creating ProfileData save swaps, editing ProfileData through friendly and advanced views, and modifying vehicle data in a decrypted GameDB.
+FH6 Local Mod Tool brings the FH6 crypto, car, animation, save-swap, and ProfileData tools together in one themed Windows desktop application.
+
+Download the self-contained Windows x64 executable from the v1.2.3 release assets, or build the source with the .NET 8 SDK.
 
 ## Table of contents
 
@@ -12,10 +14,11 @@ FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding
 - [Your first complete car edit](#your-first-complete-car-edit)
 - [Which buttons require Apply?](#which-buttons-require-apply)
 - [Output-name cheat sheet](#output-name-cheat-sheet)
-- [Section 1: Local Crypto](#section-1-local-crypto)
+- [Section 1: Crypto](#section-1-crypto)
 - [Section 2: Car Editor](#section-2-car-editor)
-- [Section 3: Save Swap](#section-3-save-swap)
-- [Section 4: Profile Editor](#section-4-profile-editor)
+- [Section 3: Animation Swap](#section-3-animation-swap)
+- [Section 4: Save Swap](#section-4-save-swap)
+- [Section 5: Profile Editor](#section-5-profile-editor)
 - [Troubleshooting](#troubleshooting)
 - [Advanced technical reference](#advanced-technical-reference)
 - [Video guide](#video-guide)
@@ -26,21 +29,23 @@ FH6 Local Crypto Tool is a Windows desktop utility for decrypting and rebuilding
 
 - Decrypt and re-encrypt GameDB `.slt` containers.
 - Decrypt, edit, and re-encrypt supported text assets such as INI, XML, JSON, TXT, and extensionless configuration files.
+- Decode unencrypted `.skeld` skeletons to editable JSON and rebuild validated binary copies.
 - Authenticate and extract encrypted ZIP entries.
 - Selectively merge another SQLite database into the staged GameDB.
 - Select exactly which donor database tables and rows are merged into the staged database.
-- Edit car availability, prices, engines, motors, fitment, drivetrains, tires, suspension, handling, and per-engine power settings.
+- Edit car availability, prices, engines, motors, fitment, wheelbase, drivetrains, tires, suspension, handling, and per-engine power settings.
 - Batch-edit multiple cars with append-only, duplicate-safe upgrade creation.
 - Compare a loaded database against an embedded stock reference, filter modified cars, and restore individual cars.
+- Swap complete front- or rear-door animations from a built-in donor library, manage CLIPD channels, and adjust supported animation endpoints.
+- Edit either a complete car ZIP or a raw `carclips_<ID>.clipd` file and save a verified copy.
+- Apply the animation-side database stance compatibility fix and access experimental non-door channels.
 - Build ProfileData save swaps while retaining the target save's container framing and canonical account XUID.
 - Edit supported ProfileData values through a friendly Overview while retaining advanced SQLite, property-tree, Save State, Career, and XML views.
 - Create renamed output files without overwriting the input files.
 
 ## Requirements
 
-The release executable is a self-contained Windows x64 application. It does not require a separate .NET installation.
-
-Building the source requires Windows 10 or Windows 11 and the .NET 8 SDK.
+The release executable supports Windows 10/11 x64 and does not require a separate .NET installation. Building from source requires the .NET 8 SDK.
 
 ## Before you begin
 
@@ -54,18 +59,19 @@ Building the source requires Windows 10 or Windows 11 and the .NET 8 SDK.
 
 ## Start here: a beginner's guide
 
-Download `FH6LocalCryptoTool.exe` from the release assets and run it. The release is a portable application, so there is no installer.
+Download and extract `FH6LocalModTool_v1.2.3.zip` from the release assets, then run `FH6ModStudio.exe`. The ZIP keeps the animation helper files beside the executable. If downloading individual files instead, keep `acl_compressor.exe` and `forzatech_acl.dll` in the same folder as `FH6ModStudio.exe`. If building from source, run the resulting `FH6ModStudio.exe` instead.
 
-The tool has four tabs:
+The tool has five tabs:
 
 | Tab | Use it when you want to... |
 |---|---|
-| **Local Crypto** | Decrypt or re-encrypt a GameDB or text asset, extract an encrypted ZIP, or merge database content. |
+| **Crypto** | Decrypt or re-encrypt a GameDB or text asset, extract an encrypted ZIP, or merge database content. |
 | **Car Editor** | Change cars, upgrades, prices, fitment, tires, suspension, drivetrains, engines, motors, or handling. |
+| **Animation Swap** | Swap door and experimental CLIPD animation channels or patch animations for database-controlled stance. |
 | **Save Swap** | Move the progress payload from one `C_ProfileData` save into another save's container. |
 | **Profile Editor** | View and edit supported ProfileData values using friendly controls or advanced data views. |
 
-![Local Crypto tab overview](Screenshots/local-crypto-overview.png)
+![Crypto tab overview](Screenshots/local-crypto-overview.png)
 
 ### The most important concept
 
@@ -126,8 +132,8 @@ Do not close the game while sitting in a car you are about to change in the data
 
 ### Part 2: decrypt the GameDB
 
-1. Open FH6 Local Crypto Tool.
-2. Select the **Local Crypto** tab.
+1. Open FH6 Local Mod Tool.
+2. Select the **Crypto** tab.
 3. Drag `MediaPC\stripped\gamedbRC.slt` into the large drop area. Do not drag the original from `media\stripped`.
 4. Look at the staged-file text. It should identify an `.slt` ready to decrypt.
 5. Click **Decrypt**.
@@ -154,7 +160,7 @@ The database originally loaded into Car Editor is not modified directly. Your ch
 
 ### Part 4: re-encrypt the edited database
 
-1. Return to **Local Crypto**.
+1. Return to **Crypto**.
 2. Check the **DB template** field. It should point to the original `gamedbRC.slt` used earlier.
 3. If it is empty or incorrect, click **Browse** beside **DB template** and select that original SLT.
 4. Drag `gamedbRC_modified.sqlite` into the large drop area.
@@ -202,21 +208,23 @@ Choose option → Apply if required → Export DB → Re-encrypt exported DB →
 | Re-encrypt GameDB | `gamedbRC_modified.sqlite` | `gamedbRC_modified.re-encrypted.slt` |
 | Decrypt text asset | `PhysicsSettings.ini` | `PhysicsSettings.decrypted.ini` |
 | Re-encrypt text asset | `PhysicsSettings.decrypted.ini` | `PhysicsSettings.modded.ini` |
+| Decode skeleton | `skeleton.skeld` | `skeleton.decrypted.skeld.json` |
+| Rebuild skeleton | `skeleton.decrypted.skeld.json` | `skeleton.modded.skeld` |
 | Extract encrypted ZIP | `Example.zip` | `Example.extracted` folder |
 | Merge database | `gamedbRC.decrypted.sqlite` | `gamedbRC.decrypted.merged.sqlite` |
 | Build save swap | target `C_ProfileData` | `C_ProfileData.swapped` |
 
 The tool does not overwrite the original input during these operations.
 
-## Section 1: Local Crypto
+## Section 1: Crypto
 
-Use this section for encrypted GameDB files, supported text assets, encrypted ZIP extraction, and database merging. Local Crypto is also the first and last step of the Car Editor workflow: decrypt the GameDB before editing it, then re-encrypt the exported database afterward.
+Use the **Crypto** tab for encrypted GameDB files, supported text assets, encrypted ZIP extraction, and database merging. Crypto is also the first and last step of the Car Editor workflow: decrypt the GameDB before editing it, then re-encrypt the exported database afterward.
 
 For GameDB work, always use the copied file at `MediaPC\stripped\gamedbRC.slt`. Keep the original `media\stripped\gamedbRC.slt` untouched.
 
 ### Decrypt a GameDB
 
-1. Open **Local Crypto**.
+1. Open **Crypto**.
 2. Optionally choose an **Output folder**. Otherwise, output is written beside the dropped file.
 3. Drag `gamedbRC.slt` onto the large drop area.
 4. Confirm that the staged-file message identifies it as an SLT ready to decrypt. The appropriate GameDB method is selected automatically.
@@ -261,6 +269,16 @@ This workflow supports authenticated text containers such as `PhysicsSettings.in
 
 Do not use a different asset or a file from another game build as the template.
 
+### Decode and rebuild a skeleton (`.skeld`)
+
+SKELD files are **not encrypted**: they are binary BSI skeleton data. The Crypto tab uses its existing buttons to convert them to editable JSON and back; no key or external template is needed.
+
+1. Drop `skeleton.skeld` onto the main area and click **Decrypt**. The tool writes `skeleton.decrypted.skeld.json` without changing the original.
+2. In the JSON, edit an existing bone's hexadecimal `id`, `parent` index, `translation` (3 floats), `scale`, or `rotation` quaternion (4 floats). Keep `originalBase64` and `originalSha256` intact: they preserve unknown binary fields and padding.
+3. Drop the edited JSON onto the main area and click **Re-encrypt**. The tool recognizes SKELD JSON even if an editor names it `skeleton.decrypted.skeld.modded.json`, then rebuilds and validates `skeleton.modded.skeld`. Do not use a generic `re-encrypted.json` asset container as a skeleton.
+
+This conversion keeps the existing bone count and file layout. It does not add or remove bones or rebuild a car ZIP. New outputs receive a numbered name if one already exists; inputs are never overwritten. Test a modified skeleton on a backed-up car first.
+
 ### Extract an encrypted ZIP
 
 1. Drag the `.zip` onto the main drop area.
@@ -271,7 +289,7 @@ Do not use a different asset or a file from another game build as the template.
 
 The current interface decrypts and extracts supported ZIP entries. It does not rebuild a modified outer ZIP archive.
 
-### Local Crypto controls
+### Crypto controls
 
 - **DB template** selects the original SLT used to frame a rebuilt GameDB.
 - **Output folder** overrides saving beside the input.
@@ -284,7 +302,7 @@ The activity log confirms each staged, decrypted, re-encrypted, or extracted fil
 
 ## Section 2: Car Editor
 
-Use this section after creating a decrypted `.sqlite` GameDB through Local Crypto. Car Editor works on a temporary copy, so remember to export the database and re-encrypt that exported file when finished.
+Use this section after creating a decrypted `.sqlite` GameDB through Crypto. Car Editor works on a temporary copy, so remember to export the database and re-encrypt that exported file when finished.
 
 ![Car Editor before a database is loaded](Screenshots/car-editor-overview.png)
 
@@ -372,9 +390,19 @@ Engine mass and engine/motor upgrade tables are keyed by EngineID or MotorID. If
 2. Only the active body tab receives tire-width, tire-profile, and track-offset edits.
 3. To edit stock and widebody fitment, configure and apply one tab, then switch tabs and repeat.
 4. Check only the sections the next Apply operation should write.
-5. Leave a box blank to skip it. Use **+** to add more boxes.
+5. Leave a box blank to skip it. Use **+** to add more absolute-value boxes, or use the repeatable step buttons to queue relative upgrades.
 
-The **+** beside the Stock body/Widebody tabs creates a new bodykit level for the selected car. The editor clones the stock body's dependent upgrade rows into the new body target so visual-mod creators can attach fresh parts without reusing the stock body level. Bodykit creation is intentionally unavailable in batch mode.
+The **+** beside the body tabs can add a widebody kit only to a car that has no factory widebody kit. A new kit copies the required body data and stock/default part rows; it does not automatically create six extra bumpers, hoods, skirts, or wings. Cars with existing factory kits remain restricted because our tests found that adding another kit to them could crash the game. Keep an untouched database backup and test each added kit in-game before distributing it.
+
+The five **+ Add one** rows below the body tabs add one front bumper, rear bumper, side skirt, hood, or rear-wing option with a left-click. Right-click the same button to remove the last added non-stock option in the selected body's ID block. Stock-reference parts and parts used by an upgrade preset cannot be removed this way. The first four categories belong to the selected body. Rear wings are stored per car by the game, so a new wing is visible across that car's bodies even though its ID is allocated from the selected body's range. These database options are placeholders for modders to link to matching visual parts in their car files.
+
+![Car Editor body-part options, wheelbase, and fitment controls](Screenshots/Screenshot%202026-09-28%20181640.png)
+
+Select an added Widebody tab and click **−** to remove that kit and its body-specific database rows after confirmation. Stock and factory bodykits are protected. The loaded database is unchanged until you export the editor's working copy.
+
+Each widebody tab shows its **upgrade PartId** (`List_UpgradeCarBody.Id`). The line below the tabs also shows its separate `CarBodyID`, car `Ordinal`, and level, so visual modders can coordinate existing database IDs with their car files.
+
+The prefilled **Wheelbase (m)** and **Bottom-center wheelbase Z** boxes edit the active body's `Data_CarBody` values when you click **Apply changes to this car**. `ModelWheelbase` is displayed separately and is not changed by these boxes. Back up the database and test geometry edits in game.
 
 If a car has more than one widebody upgrade, each widebody receives its own numbered tab. Treat every body tab separately and click Apply while the body you intend to edit is active. Rim sizes are the exception because the rim-size list is shared by the whole car.
 
@@ -385,11 +413,13 @@ Available fields:
 - **Tire profile:** Front and rear aspect-ratio offsets. Negative values create a lower profile.
 - **Track width / offset:** Front and rear spacer offsets. Start small, such as `0.03`, `0.05`, or `0.08`.
 
+Single-car mode keeps the prefilled absolute boxes and also provides the same repeatable controls as batch mode: rims `−1`/`+1` inch, widths `−10`/`+10` mm, profiles `−2`/`+2`, and track `+0.02 m`. Each click queues another upgrade; right-click removes the last queued level. Tire-width, profile, and track steps apply only to the active **Stock body** or **Widebody** tab. Relative steps are append-only, preserve existing choices, and skip duplicates.
+
 **Reset fitment to stock (selected body)** removes non-stock tire-width, tire-profile, and track-offset options from the active body. It does not reset the shared rim-size list.
 
 #### Multi-car batch fitment
 
-Ctrl-click or Shift-click cars in the list to enter batch mode. Bodykit creation is disabled while multiple cars are selected. Batch fitment preserves every stock and existing upgrade row and adds only genuinely new values.
+Ctrl-click or Shift-click cars in the list to enter batch mode. Batch fitment preserves every stock and existing upgrade row and adds only genuinely new values.
 
 - Rim buttons add `−1` or `+1` inch per click from each car's stock diameter.
 - Front and rear tire-width buttons add `−10` or `+10` mm per click from each axle's stock width.
@@ -399,7 +429,9 @@ Ctrl-click or Shift-click cars in the list to enter batch mode. Bodykit creation
 - Queued values are stored from lowest to highest, including their database row ordering. Track choices advance in exact `0.02 m` steps from one fixed starting point.
 - Existing matching values are skipped, and pressing Apply again does not create duplicate upgrade rows. Stock values remain available in game and are not duplicated as upgrade rows, so the editor can show one intentional gap at the stock value.
 
-Batch mode also supports suspension, drivetrain, tires, engine operations, power-builder settings, Autoshow availability, and price actions where shown. Single-car mode remains prefilled and uses absolute fitment values.
+Batch mode also supports suspension, drivetrain, tires, engine operations, power-builder settings, Autoshow availability, and price actions where shown. Single-car mode remains prefilled for direct absolute editing while also offering the repeatable relative step buttons.
+
+Large batch Apply jobs group their SQLite writes into one transaction and show car-by-car progress. The editor controls are temporarily disabled so the selected settings stay fixed, but the window can repaint between cars. If Apply encounters an unexpected error, the grouped writes are rolled back. This is a CPU/SQLite optimization; no GPU is required.
 
 ### Drivetrain options
 
@@ -416,7 +448,7 @@ Check the desired items, then click **APPLY changes to this car**.
 - If both tire options are checked, the vintage set is created first and FE choices are added afterward.
 - **Slam it — drift suspension** creates a Drift suspension when missing and lowers its ride-height range.
 - **Steering angle** sets the Drift suspension steering angle; `50.0` is supplied as the starting value.
-- **Lift kit — rally suspension** creates a Rally suspension when missing and extends maximum ride height by `0.10` above stock maximum.
+- **Lift kit — rally suspension (+20 in)** creates a Rally suspension when missing and extends maximum ride height exactly `20 in` (`0.508 m`) above stock maximum.
 
 Select the desired options and click **APPLY changes to this car**.
 
@@ -438,6 +470,7 @@ Handling reversion is stored per car for the current session. Reloading the orig
 
 - **APPLY changes to this car** writes checked fitment, drivetrain, tire, and stance sections to the working copy.
 - Engine, motor, Autoshow, FE-car, price, and enhanced-handling buttons act immediately on the working copy.
+- Pending fitment inputs and repeatable step-button clicks remain in place when you apply engine or power changes; applying fitment does not clear pending power-builder inputs. You can prepare both sections before pressing their separate Apply buttons.
 - **Reload** discards current working changes and reloads the original selected database.
 - **Export DB** writes the working copy to a new `.sqlite` file.
 
@@ -445,12 +478,55 @@ Recommended finish:
 
 1. Review the activity log for warnings or skipped operations.
 2. Click **Export DB** and use a new filename.
-3. Return to **Local Crypto**.
+3. Return to **Crypto**.
 4. Select the original matching SLT as the DB template.
 5. Re-encrypt the exported SQLite database.
 6. Back up the game's current SLT before installing and testing the rebuilt one.
 
-## Section 3: Save Swap
+## Section 3: Animation Swap
+
+Animation Swap is the integrated, re-themed v2.2 animation tool. It accepts a complete car ZIP or a raw `carclips_<ID>.clipd`, keeps the source file untouched, and saves a new structurally verified result.
+
+![Animation Swap tab with donor selection and CLIPD channel controls](Screenshots/Screenshot%202026-09-28%20181751.png)
+
+### Swap door animations
+
+1. Open **Animation Swap**.
+2. Drag in a clean complete car ZIP or raw `carclips_<ID>.clipd`, or click **Browse**.
+3. Select **Front doors** or **Rear doors**.
+4. Choose a donor car from the built-in animation library.
+5. Click **Apply donor → selected animation**.
+6. Front and rear doors may use different donor cars. If a donor has no rear-door data, the tool can use its matching front-door motion as a fallback.
+7. Click **Save As** and test the new file in game.
+
+The tool warns when a known car's starting animation data differs from its stock baseline. Start from a clean game file whenever possible.
+
+### Other animation channels
+
+Expand **Other channels (experimental)** to inspect supported hood, trunk, wing, and other non-door channels. Direction has not been verified for every car/channel combination, so test these changes carefully.
+
+Expand **Manage CLIPD channels** to see every animation in the loaded car. Select channels under **This car** and click **Remove selected**, or load a donor CLIPD/car ZIP, select its channels, and click **Add selected**. Imports preserve the donor channel IDs and skip IDs already present; they do not overwrite an existing animation. Nothing is written until **Save As**. The tool checks the rebuilt channel count and preserves every unaffected animation record. New part animations may also require matching skeleton bones and Mojo events to play in game.
+
+Select one channel under **This car** and click **Adjust start/end...** to edit its animation endpoints. Choose the animated track; the boxes show that track's current start and end positions (metres) and rotations (degrees) from the loaded CLIPD. Edit the values you want to change and leave the others untouched. The tool blends the changes through the frames and rebuilds that channel. Save As creates a separate patched file; keep your original and test the result in game. Other channels remain byte-for-byte unchanged, though lossy recompression can slightly change intermediate frames within the edited channel.
+
+![Endpoint editor for a door animation](Screenshots/Screenshot%202026-09-28%20181803.png)
+
+![Endpoint editor with tachometer-needle track selected](Screenshots/Screenshot%202026-09-28%20181829.png)
+
+CLIPD stores compressed Mojo/ACL animation records, not embedded GR2 files. Blender/GR2 export and import are not available yet. The endpoint editor uses bundled ACL tools; their license notices are included alongside the app.
+
+### Database stance compatibility
+
+**Fix DB ride height / spacers** removes authored suspension animation channels that can override ride-height and track-width changes made in the GameDB. This is intended for cars whose animation data prevents database stance edits from rendering correctly.
+
+### Animation output safety
+
+- Complete ZIP input produces a complete patched ZIP with the original archive layout retained.
+- Raw CLIPD input produces a new CLIPD file.
+- **Reset** reloads the original source and discards unsaved animation changes.
+- Before writing, the tool rebuilds and reparses the CLIPD, validates its size trailer, checks its node-stream boundary, and blocks structurally unsafe output.
+
+## Section 4: Save Swap
 
 Use Save Swap when you want to put the progress from one FH6 save into another account's save container. The save containing the progress is the **donor**. The save belonging to the account that will use that progress is the **target**.
 
@@ -530,7 +606,7 @@ The selected donor and target files remain unchanged.
 6. Confirm that the expected progress loads before continuing to play.
 7. If the game rejects the file, loads unexpected data, or cloud sync chooses the wrong version, close the game and restore the untouched target backup.
 
-## Section 4: Profile Editor
+## Section 5: Profile Editor
 
 Profile Editor opens an encrypted `C_ProfileData`, validates and decrypts it locally, and presents both everyday controls and advanced data views. Export creates a new encrypted result; the loaded input remains unchanged.
 
@@ -634,7 +710,7 @@ Save compatibility can still depend on the game build and the data inside each p
 
 ### Merge another database
 
-1. Decrypt a GameDB or drag a base `.sqlite` onto the main Local Crypto drop area.
+1. Decrypt a GameDB or drag a base `.sqlite` onto the main Crypto drop area.
 2. Drag another modded or updated `.sqlite` onto the smaller merge area.
 3. Click **Merge** to open the themed selection window.
 4. Each listed table offers two different actions:
@@ -648,6 +724,12 @@ Save compatibility can still depend on the game build and the data inside each p
 ![Mod Merge table and row selection window](Screenshots/mod-merge-selection.png)
 
 The staged database remains the base, and neither source file is overwritten. Whole-table rebuilds preserve the donor table definition, keys, row IDs, indexes, and triggers, then verify the copied contents and SQLite integrity. Keep backups: structurally valid rows can still be incompatible with another mod or game build.
+
+### Import one modded car's widebodies
+
+This is a **separate** Crypto action; the general **Merge** button above is unchanged. Load or decrypt your base GameDB in the main drop area, place a decrypted donor `.sqlite` in the merge area, then click **Import widebody car**. Select one donor car from the list. The importer writes a new `<base-name>.widebodymerge.<car-id>.<timestamp>.sqlite` and stages it for re-encryption; it does not overwrite either input.
+
+For that car, the focused import copies its non-stock body IDs, body data, body-specific bumpers, skirts and hoods, chassis/weight and tire-width/profile/track-spacing rows, relevant presets, and car-wide rear-wing options. It does not import unrelated cars or the car-wide rim-size and tire-compound tables. By default it imports only new kit IDs and refuses conflicting required row IDs. If you also want the donor's edits to existing kits or parts, check **Override conflicting rows for the selected car**. This opt-in setting replaces matching scoped rows in the *new output*; it refuses IDs owned by another car or body. Shared aero tuning IDs may also be replaced and can affect other cars, so review the result and test it in-game.
 
 ### Build from source
 
@@ -665,7 +747,7 @@ A video walkthrough is planned. Community-made guides are also welcome.
 
 ## Disclaimer
 
-FH6 Local Crypto Tool is an unofficial project and is not affiliated with or endorsed by Microsoft, Xbox, Playground Games, or Turn 10 Studios. Keep backups and use modified files at your own risk.
+FH6 Local Mod Tool is an unofficial project and is not affiliated with or endorsed by Microsoft, Xbox, Playground Games, or Turn 10 Studios. Keep backups and use modified files at your own risk.
 
 ## Credits
 

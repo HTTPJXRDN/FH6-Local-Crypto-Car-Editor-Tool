@@ -355,7 +355,7 @@
 
         <StackPanel Grid.Column="0" VerticalAlignment="Center">
           <TextBlock FontSize="22" FontWeight="Bold">
-            <Run Text="FH6" Foreground="{StaticResource Pink}"/><Run Text=" Profile Editor"/>
+            <Run Text="Profile" Foreground="{StaticResource Pink}"/><Run Text=" Editor"/>
           </TextBlock>
           <TextBlock x:Name="StatusLine" Text="no save loaded — click Load C_ProfileData to begin"
                      Foreground="{StaticResource Dim}" FontSize="12" Margin="0,3,0,0"/>

@@ -2,9 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="Choose donor changes" Width="900" Height="720" MinWidth="620" MinHeight="470"
+        Title="FH6 Local Mod Tool - Mod Merge" Width="900" Height="720" MinWidth="620" MinHeight="470"
         WindowStartupLocation="CenterOwner" Background="#FF1D1D1F" Foreground="#FFF4F4F6"
-        Icon="/FH6LocalCryptoTool;component/Assets/ICO/dbtool_icon.ico" WindowStyle="None" ResizeMode="CanResize"
+        Icon="/FH6ModStudio;component/Assets/ICO/dbtool_icon.ico" WindowStyle="None" ResizeMode="CanResize"
         TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True"
         StateChanged="Window_StateChanged">
     <Window.Resources>
@@ -231,7 +231,7 @@
             </Grid.RowDefinitions>
             <Border Grid.Row="0" Background="#FF161618">
                 <Grid>
-                    <TextBlock Text="FH6 LOCAL CRYPTO TOOL  /  MOD MERGE" Foreground="{StaticResource Dim}"
+                    <TextBlock Text="FH6 LOCAL MOD TOOL  /  MOD MERGE" Foreground="{StaticResource Dim}"
                                FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" Margin="16,0,0,0"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Style="{StaticResource CaptionButton}" Content="&#xE921;" ToolTip="Minimize"

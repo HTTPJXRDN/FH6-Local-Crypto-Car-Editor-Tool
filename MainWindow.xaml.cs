@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Interop;
@@ -168,24 +170,29 @@ public partial class MainWindow : Window
     private void StageInput(string path)
     {
         _pendingInput = path;
+        bool skeld = IsSkeld(path);
+        bool skeldJson = IsSkeldJson(path);
         bool zip = string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase);
         bool sqlite = IsSqlite(path);
-        bool plainText = !zip && !sqlite && IsTextIni(path);                      // decrypted text asset → re-encrypt
-        bool asset = !zip && !sqlite && !plainText && IsAssetContainer(path);      // encrypted General asset → decrypt
+        bool plainText = !skeld && !skeldJson && !zip && !sqlite && IsTextIni(path);  // decrypted text asset → re-encrypt
+        bool asset = !skeld && !skeldJson && !zip && !sqlite && !plainText && IsAssetContainer(path);
         // Asset/zip/plain-text use the General key; everything else (a gamedb .slt, a
         // decrypted gamedb .sqlite, or an unknown container) uses GameDB. Setting GameDB
         // explicitly here — rather than leaving whatever was selected before — stops a
         // prior .ini/.zip General selection from carrying over onto a .slt and corrupting
         // the decrypt.
-        KeyCombo.SelectedItem = (zip || asset || plainText) ? "General" : "GameDB";
-        string what = zip ? ".zip → decrypt & extract"
+        if (!skeld && !skeldJson)
+            KeyCombo.SelectedItem = (zip || asset || plainText) ? "General" : "GameDB";
+        string what = skeld ? ".skeld → decode editable JSON (no key)"
+                    : skeldJson ? ".skeld.json → rebuild .skeld (no key)"
+                    : zip ? ".zip → decrypt & extract"
                     : plainText ? "decrypted text → Re-encrypt"
                     : sqlite ? ".sqlite → Re-encrypt"
                     : asset ? "encrypted asset → Decrypt"
                     : ".slt → Decrypt";
         StagedText.Text = $"Staged: {Path.GetFileName(path)}   ({what})";
         StagedText.Visibility = Visibility.Visible;
-        Log($"Staged {Path.GetFileName(path)} — click {((sqlite || plainText) ? "Re-encrypt" : "Decrypt")} to run.{((zip || asset || plainText) ? " General key selected automatically." : "")}");
+        Log($"Staged {Path.GetFileName(path)} — click {((sqlite || plainText || skeldJson) ? "Re-encrypt" : "Decrypt")} to run.{((zip || asset || plainText) ? " General key selected automatically." : "")}");
         Status("File staged.");
     }
 
@@ -216,7 +223,7 @@ public partial class MainWindow : Window
             Status("Wrong action for a .sqlite.");
             return;
         }
-        if (IsTextIni(_pendingInput))
+        if (IsSkeldJson(_pendingInput) || IsTextIni(_pendingInput))
         {
             Log("Staged file is already plain text — use Re-encrypt.");
             Status("Wrong action for a decrypted file.");
@@ -225,7 +232,9 @@ public partial class MainWindow : Window
         try
         {
             string ext = Path.GetExtension(_pendingInput);
-            if (string.Equals(ext, ".zip", StringComparison.OrdinalIgnoreCase))
+            if (IsSkeld(_pendingInput))
+                DecodeSkeldFlow(_pendingInput);
+            else if (string.Equals(ext, ".zip", StringComparison.OrdinalIgnoreCase))
                 ExtractZipFlow(_pendingInput);
             else if (string.Equals(ext, ".slt", StringComparison.OrdinalIgnoreCase))
                 DecryptFlow(_pendingInput);                                   // gamedb container (explicit)
@@ -254,14 +263,21 @@ public partial class MainWindow : Window
             Status("Nothing to re-encrypt.");
             return;
         }
-        bool plainText = IsTextIni(src);
-        if (!IsSqlite(src) && !plainText)
+        bool skeldJson = IsSkeldJson(src);
+        bool plainText = !skeldJson && IsTextIni(src);
+        if (!IsSqlite(src) && !plainText && !skeldJson)
         {
             Log("Staged file is not a decrypted SQLite or text asset.");
             Status("Wrong action for this file.");
             return;
         }
-        try { if (plainText) EncryptAssetFlow(src); else EncryptFlow(src); } catch (Exception ex) { Fail(ex, src); }
+        try
+        {
+            if (skeldJson) EncodeSkeldFlow(src);
+            else if (plainText) EncryptAssetFlow(src);
+            else EncryptFlow(src);
+        }
+        catch (Exception ex) { Fail(ex, src); }
     }
 
     private void Merge_Click(object sender, RoutedEventArgs e)
@@ -275,7 +291,69 @@ public partial class MainWindow : Window
         try { MergeFlow(_pendingOverlay); } catch (Exception ex) { Fail(ex, _pendingOverlay); }
     }
 
+    private async void WidebodyMerge_Click(object sender, RoutedEventArgs e)
+    {
+        if (!WidebodyMergeBtn.IsEnabled) return;
+        if (_pendingOverlay is null)
+        {
+            Log("No donor staged - drop a decrypted .sqlite onto the merge zone first.");
+            Status("Nothing to import.");
+            return;
+        }
+        WidebodyMergeBtn.IsEnabled = false;
+        try { await WidebodyMergeFlow(_pendingOverlay); }
+        catch (Exception ex) { Fail(ex, _pendingOverlay); }
+        finally { WidebodyMergeBtn.IsEnabled = true; }
+    }
+
     // ---------- flows ----------
+    private void DecodeSkeldFlow(string path)
+    {
+        Status($"Decoding {Path.GetFileName(path)}…");
+        byte[] source = File.ReadAllBytes(path);
+        string json = SkeldCodec.Decode(source);
+        string name = Path.GetFileNameWithoutExtension(path) + ".decrypted.skeld.json";
+        string output = UniqueOutputPath(Path.Combine(OutputDirFor(path), name));
+        File.WriteAllText(output, json, new System.Text.UTF8Encoding(false));
+        Log($"Decoded BSI skeleton (not encrypted): {Path.GetFileName(path)} -> {Path.GetFileName(output)}");
+        Log("    Edit existing bone IDs, parents, and transforms; keep the embedded original bytes intact.");
+        Done(output, "SKELD decoded to JSON.");
+    }
+
+    private void EncodeSkeldFlow(string path)
+    {
+        Status($"Rebuilding {Path.GetFileName(path)}…");
+        byte[] outputBytes = SkeldCodec.Encode(File.ReadAllText(path));
+        string output = UniqueOutputPath(Path.Combine(OutputDirFor(path), SkeldOutputFileName(path)));
+        File.WriteAllBytes(output, outputBytes);
+        Log($"Rebuilt BSI skeleton (no encryption): {Path.GetFileName(path)} -> {Path.GetFileName(output)}");
+        Done(output, "SKELD rebuilt and validated.");
+    }
+
+    private static string SkeldOutputFileName(string path)
+    {
+        string stem = Path.GetFileNameWithoutExtension(path);
+        foreach (string suffix in new[] { ".modded", ".skeld", ".decrypted" })
+            if (stem.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                stem = stem[..^suffix.Length];
+        return stem + ".modded.skeld";
+    }
+
+    private static string UniqueOutputPath(string path)
+    {
+        if (!File.Exists(path)) return path;
+        string directory = Path.GetDirectoryName(path)!;
+        string fileName = Path.GetFileName(path);
+        string extension = fileName.EndsWith(".skeld.json", StringComparison.OrdinalIgnoreCase)
+            ? ".skeld.json" : Path.GetExtension(path);
+        string stem = fileName[..^extension.Length];
+        for (int i = 2; ; i++)
+        {
+            string candidate = Path.Combine(directory, $"{stem}-{i}{extension}");
+            if (!File.Exists(candidate)) return candidate;
+        }
+    }
+
     private void DecryptFlow(string sltPath)
     {
         var key = SelectedKey();
@@ -436,6 +514,43 @@ public partial class MainWindow : Window
         Done(outPath, "Merge complete.");
     }
 
+    private async Task WidebodyMergeFlow(string donorPath)
+    {
+        string? baseDb = (_pendingInput is not null && IsSqlite(_pendingInput))
+            ? _pendingInput : _lastDecryptedSqlite;
+        if (baseDb is null || !File.Exists(baseDb))
+            throw new InvalidOperationException("Load or decrypt a base .sqlite in the top zone first.");
+        if (!IsSqlite(donorPath))
+            throw new InvalidOperationException("Widebody import needs a decrypted donor .sqlite file.");
+
+        Status("Finding donor widebody cars...");
+        var preview = await Task.Run(() => Merge.PreviewWidebodyCars(baseDb, donorPath));
+        if (preview.Cars.Count == 0)
+        {
+            Log("No donor cars with widebody kits were found in the loaded base DB.");
+            Status("No donor widebody cars.");
+            return;
+        }
+        var picker = new WidebodyMergeWindow(preview) { Owner = this };
+        if (picker.ShowDialog() != true || picker.SelectedCarId is not long carId)
+        { Status("Widebody import cancelled."); return; }
+
+        string dir = OutputDirFor(baseDb);
+        string stem = Path.GetFileNameWithoutExtension(baseDb) + ".widebodymerge." +
+                      carId + "." + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string outPath = UniqueOutputPath(Path.Combine(dir, stem + ".sqlite"));
+        Status($"Importing car {carId} widebody rows...");
+        int rows = await Task.Run(() => Merge.RunWidebodyCar(preview, carId, outPath,
+            picker.ReplaceConflicts,
+            msg => Dispatcher.Invoke(() => Log("    " + msg))));
+        _lastDecryptedSqlite = outPath;
+        _pendingInput = outPath;
+        StagedText.Text = $"Staged: {Path.GetFileName(outPath)}   (.sqlite -> Re-encrypt)";
+        StagedText.Visibility = Visibility.Visible;
+        Log($"Imported {rows:n0} row(s) for car {carId} into {Path.GetFileName(outPath)}; click Re-encrypt when ready.");
+        Done(outPath, "Widebody car import complete.");
+    }
+
     private string UniqueMergeOutput(string baseDb)
     {
         string dir = OutputDirFor(baseDb);
@@ -527,7 +642,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             SwapStatusText.Text = "ERROR: " + ex.Message;
-            MessageBox.Show(ex.Message, "FH6 Local Crypto Tool — Save Swap", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(ex.Message, "FH6 Local Mod Tool — Save Swap", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -573,6 +688,30 @@ public partial class MainWindow : Window
             return n >= 15 && System.Text.Encoding.ASCII.GetString(hdr[..15].ToArray()) == "SQLite format 3";
         }
         catch { return false; }
+    }
+
+    private static bool IsSkeld(string path) =>
+        Path.GetExtension(path).Equals(".skeld", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSkeldJson(string path)
+    {
+        if (!Path.GetExtension(path).Equals(".json", StringComparison.OrdinalIgnoreCase)) return false;
+        // Route even damaged SKELD-named JSON through the SKELD validator, never
+        // through generic asset encryption (which produces a non-SKELD container).
+        if (Path.GetFileName(path).Contains(".skeld.", StringComparison.OrdinalIgnoreCase)) return true;
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var json = JsonDocument.Parse(stream);
+            return json.RootElement.ValueKind == JsonValueKind.Object &&
+                   json.RootElement.TryGetProperty("Format", out var format) &&
+                   format.ValueKind == JsonValueKind.String &&
+                   format.GetString() == "FH6-SKELD-BSI-v1";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
     }
 
     // A General-key asset CryptoContainer (PhysicsSettings.ini, AnimResourceConfig, …):
@@ -622,7 +761,7 @@ public partial class MainWindow : Window
     {
         Log($"ERROR on {Path.GetFileName(path)}: {ex.Message}");
         Status("Error — see log.");
-        MessageBox.Show(ex.Message, "FH6 Local Crypto Tool", MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show(ex.Message, "FH6 Local Mod Tool", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     private void Log(string msg)
