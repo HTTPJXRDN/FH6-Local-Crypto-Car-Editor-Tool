@@ -59,7 +59,7 @@ The release executable supports Windows 10/11 x64 and does not require a separat
 
 ## Start here: a beginner's guide
 
-Download and extract `FH6LocalModTool_v1.2.3.zip` from the release assets, then run `FH6ModStudio.exe`. The ZIP keeps the animation helper files beside the executable. If downloading individual files instead, keep `acl_compressor.exe` and `forzatech_acl.dll` in the same folder as `FH6ModStudio.exe`. If building from source, run the resulting `FH6ModStudio.exe` instead.
+Download and extract `FH6LocalModTool_v1.2.3.zip` from the release assets, extract it, then run `FH6ModStudio.exe`. The ZIP keeps the animation helper files beside the executable. If downloading individual files instead, keep `acl_compressor.exe` and `forzatech_acl.dll` in the same folder as `FH6ModStudio.exe`. If building from source, run the resulting `FH6ModStudio.exe` instead.
 
 The tool has five tabs:
 
