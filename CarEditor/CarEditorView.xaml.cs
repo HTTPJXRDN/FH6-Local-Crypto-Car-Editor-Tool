@@ -17,6 +17,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Data.Sqlite;
 using Microsoft.Win32;
+using FH6LocalCryptoTool;
 
 namespace FH6CarEditor;
 
@@ -1408,7 +1409,7 @@ public partial class CarEditorView : UserControl
             .Select(r => Convert.ToInt64(r["Ordinal"])).ToArray();
 
     static string PowerText(object value, string format) => value == null
-        ? "" : Convert.ToDouble(value).ToString(format, CultureInfo.InvariantCulture);
+        ? "" : Convert.ToDouble(value).ToString(format, CultureInfo.CurrentCulture);
 
     void SetPowerField(CheckBox option, TextBox box, bool enabled, string text)
     {
@@ -1587,8 +1588,7 @@ public partial class CarEditorView : UserControl
     bool TryPowerNumber(TextBox box, string label, double minimum, double maximum, out double value)
     {
         string text = box.Text.Trim().TrimEnd('%');
-        bool valid = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) ||
-                     double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value);
+        bool valid = NumericText.TryParseDouble(text, out value);
         if (valid && value >= minimum && value <= maximum) return true;
         Log($"{label} must be a number from {minimum:0.##} to {maximum:0.##}", "warn");
         value = 0;
@@ -2176,8 +2176,9 @@ public partial class CarEditorView : UserControl
         {
             if (values.Count >= MaxFit) return;
             clicks++;
-            var backingValue = MakeNum((step * clicks).ToString("0.###", CultureInfo.InvariantCulture), relative: true);
-            backingValue.Visibility = Visibility.Collapsed;
+            var backingValue = MakeNum((step * clicks).ToString("0.###", CultureInfo.CurrentCulture), relative: true);
+            backingValue.ToolTip = "Queued stock-relative step. Left-click the button to add another; right-click it to remove the last.";
+            panel.Children.Insert(panel.Children.IndexOf(preset), backingValue);
             values.Add(backingValue);
             queuedValues.Add(backingValue);
             RefreshButton();
@@ -2187,6 +2188,7 @@ public partial class CarEditorView : UserControl
             if (queuedValues.Count == 0) return;
             var backingValue = queuedValues[^1];
             queuedValues.RemoveAt(queuedValues.Count - 1);
+            panel.Children.Remove(backingValue);
             values.Remove(backingValue);
             clicks--;
             RefreshButton();
@@ -2705,7 +2707,7 @@ public partial class CarEditorView : UserControl
     {
         panel.Children.Clear(); list.Clear();
         var vals = Query(sql, body).Select(r => Convert.ToDouble(r["v"])).ToList();
-        foreach (var v in vals.Take(MaxFit)) AddNum(panel, list, v.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture));
+        foreach (var v in vals.Take(MaxFit)) AddNum(panel, list, v.ToString(fmt, CultureInfo.CurrentCulture));
         while (list.Count < minimumBoxes) AddNum(panel, list, "");
     }
     void FillFitment()
@@ -2738,8 +2740,8 @@ public partial class CarEditorView : UserControl
             row["BottomCenterWheelbasePosZ"] == null || row["BottomCenterWheelbasePosZ"] is DBNull) return;
         _loadedWheelbase = Convert.ToDouble(row["Wheelbase"]);
         _loadedWheelbaseZ = Convert.ToDouble(row["BottomCenterWheelbasePosZ"]);
-        _loadedWheelbaseText = _loadedWheelbase.ToString("0.######", CultureInfo.InvariantCulture);
-        _loadedWheelbaseZText = _loadedWheelbaseZ.ToString("0.######", CultureInfo.InvariantCulture);
+        _loadedWheelbaseText = _loadedWheelbase.ToString("0.######", CultureInfo.CurrentCulture);
+        _loadedWheelbaseZText = _loadedWheelbaseZ.ToString("0.######", CultureInfo.CurrentCulture);
         WheelbaseBox.Text = _loadedWheelbaseText;
         WheelbaseZBox.Text = _loadedWheelbaseZText;
         _geometryBodyId = bodyId;
@@ -3116,6 +3118,15 @@ public partial class CarEditorView : UserControl
         long carId = _car.Id;
         try
         {
+            // Validate before any UPDATE/DELETE. An unparseable nonblank fitment
+            // box must never turn into an empty request that clears upgrade rows.
+            if ((OptRims.IsChecked == true && !ValidateFitmentNumbers(_rf, "rim size")) ||
+                (OptWidth.IsChecked == true && (!ValidateFitmentNumbers(_wf, "front tire width") ||
+                                                !ValidateFitmentNumbers(_wr, "rear tire width"))) ||
+                (OptAspect.IsChecked == true && !ValidateFitmentNumbers(_sw, "tire profile")) ||
+                (OptTrack.IsChecked == true && (!ValidateFitmentNumbers(_ofF, "front track width") ||
+                                                !ValidateFitmentNumbers(_ofR, "rear track width"))))
+                return;
             double driftSteeringAngle = 0;
             if (OptSlam.IsChecked == true && !TryGetDriftSteeringAngle(out driftSteeringAngle)) return;
             if (!TryReadBodyGeometryEdit(out long geometryBodyId, out double wheelbase,
@@ -3407,9 +3418,7 @@ public partial class CarEditorView : UserControl
         static bool Read(TextBox box, string initialText, double original, out double value)
         {
             if (box.Text.Trim() == initialText) { value = original; return true; }
-            return (double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) ||
-                    double.TryParse(box.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out value)) &&
-                   double.IsFinite(value);
+            return NumericText.TryParseDouble(box.Text, out value);
         }
         if (!Read(WheelbaseBox, _loadedWheelbaseText, _loadedWheelbase, out wheelbase) ||
             !Read(WheelbaseZBox, _loadedWheelbaseZText, _loadedWheelbaseZ, out wheelbaseZ) ||
@@ -3422,8 +3431,7 @@ public partial class CarEditorView : UserControl
     bool TryGetDriftSteeringAngle(out double angle)
     {
         string text = DriftSteeringAngle.Text.Trim();
-        bool valid = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out angle) ||
-                     double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out angle);
+        bool valid = NumericText.TryParseDouble(text, out angle);
         if (valid && angle >= 0 && angle <= 180) return true;
 
         Log("drift steering angle must be a number from 0 to 180 degrees", "warn");
@@ -3916,5 +3924,16 @@ public partial class CarEditorView : UserControl
 
     // ---- numeric field helpers ----
     static int GetInt(TextBox t, int def) => int.TryParse(t.Text, out var v) ? v : def;
-    static double? OptNum(TextBox t) => double.TryParse(t.Text, out var v) ? v : (double?)null;  // blank/invalid -> skip
+    bool ValidateFitmentNumbers(IEnumerable<TextBox> boxes, string label)
+    {
+        foreach (var box in boxes)
+        {
+            if (string.IsNullOrWhiteSpace(box.Text) || NumericText.TryParseDouble(box.Text, out _)) continue;
+            Log($"Invalid {label} value '{box.Text}'. Use a comma or dot as the decimal separator; no changes were applied.", "warn");
+            return false;
+        }
+        return true;
+    }
+
+    static double? OptNum(TextBox t) => NumericText.TryParseDouble(t.Text, out var v) ? v : (double?)null;  // blank -> skip; nonblank invalid is rejected before Apply
 }

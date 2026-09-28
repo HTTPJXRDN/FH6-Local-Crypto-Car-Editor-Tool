@@ -1084,6 +1084,7 @@ public partial class ProfileEditorView : UserControl
     {
         if (v == null || v is DBNull) return "";
         if (v is byte[] b) return $"<blob {b.Length}B>";
+        if (v is double or float or decimal) return Convert.ToString(v, CultureInfo.CurrentCulture);
         return Convert.ToString(v, CultureInfo.InvariantCulture);
     }
 
@@ -1092,7 +1093,7 @@ public partial class ProfileEditorView : UserControl
     {
         if (text.Length == 0) return "";
         if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long l)) return l;
-        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double d)) return d;
+        if (NumericText.TryParseDouble(text, out double d)) return d;
         return text;
     }
 

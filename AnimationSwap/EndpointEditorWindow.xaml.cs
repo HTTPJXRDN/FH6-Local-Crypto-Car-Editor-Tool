@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using ClipdScissorTool;
+using FH6LocalCryptoTool;
 
 namespace FH6AnimationSwap;
 
@@ -57,7 +58,7 @@ public partial class EndpointEditorWindow : Window
 
     void Fill(TextBox box, float value)
     {
-        box.Text = value.ToString("0.######", CultureInfo.InvariantCulture);
+        box.Text = value.ToString("0.######", CultureInfo.CurrentCulture);
         _initialText[box] = box.Text;
     }
 
@@ -113,8 +114,7 @@ public partial class EndpointEditorWindow : Window
 
     static float Parse(TextBox box)
     {
-        if (!float.TryParse(box.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out float value) &&
-            !float.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+        if (!NumericText.TryParseFloat(box.Text, out float value))
             throw new FormatException($"Enter a valid number for {box.Name}.");
         if (!float.IsFinite(value)) throw new FormatException($"{box.Name} must be a finite number.");
         return value;

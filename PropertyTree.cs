@@ -124,8 +124,8 @@ public sealed class PropertyTree
                 case "Int32":   return BinaryPrimitives.ReadInt32LittleEndian(RawValue).ToString(CultureInfo.InvariantCulture);
                 case "UInt64":  return BinaryPrimitives.ReadUInt64LittleEndian(RawValue).ToString(CultureInfo.InvariantCulture);
                 case "Int64":   return BinaryPrimitives.ReadInt64LittleEndian(RawValue).ToString(CultureInfo.InvariantCulture);
-                case "Float32": return BinaryPrimitives.ReadSingleLittleEndian(RawValue).ToString("R", CultureInfo.InvariantCulture);
-                case "Float64": return BinaryPrimitives.ReadDoubleLittleEndian(RawValue).ToString("R", CultureInfo.InvariantCulture);
+                case "Float32": return BinaryPrimitives.ReadSingleLittleEndian(RawValue).ToString("R", CultureInfo.CurrentCulture);
+                case "Float64": return BinaryPrimitives.ReadDoubleLittleEndian(RawValue).ToString("R", CultureInfo.CurrentCulture);
                 case "StringNarrow":
                 {
                     int len = (int)BinaryPrimitives.ReadUInt32LittleEndian(RawValue);
@@ -165,9 +165,16 @@ public sealed class PropertyTree
                     }
                     else if (s.IsFloat)
                     {
-                        double d = double.Parse(text.Trim(), CultureInfo.InvariantCulture);
-                        if (s.Name == "Float32") BinaryPrimitives.WriteSingleLittleEndian(framed, (float)d);
-                        else BinaryPrimitives.WriteDoubleLittleEndian(framed, d);
+                        if (s.Name == "Float32")
+                        {
+                            if (!NumericText.TryParseFloat(text, out float f)) return false;
+                            BinaryPrimitives.WriteSingleLittleEndian(framed, f);
+                        }
+                        else
+                        {
+                            if (!NumericText.TryParseDouble(text, out double d)) return false;
+                            BinaryPrimitives.WriteDoubleLittleEndian(framed, d);
+                        }
                     }
                     else if (s.IsUnsignedInt)
                     {

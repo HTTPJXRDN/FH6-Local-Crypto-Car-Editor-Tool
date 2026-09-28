@@ -6,10 +6,12 @@ using Microsoft.Data.Sqlite;
 
 namespace FH6LocalCryptoTool;
 
-public sealed record WidebodyMergeCar(long Ordinal, string MediaName, int NewKitCount, int DonorKitCount)
+public sealed record WidebodyMergeCar(long Ordinal, string MediaName, int NewKitCount, int DonorKitCount,
+                                      int NewStockPartCount)
 {
     public override string ToString() =>
-        $"{MediaName}  (car {Ordinal})  -  {NewKitCount} new / {DonorKitCount} donor kit(s)";
+        $"{MediaName}  (car {Ordinal})  -  {NewKitCount} new / {DonorKitCount} donor kit(s), " +
+        $"{NewStockPartCount} new stock-body option(s)";
 }
 
 public sealed record WidebodyMergePreview(
@@ -42,7 +44,7 @@ public static partial class Merge
         if (!File.Exists(basePath) || !File.Exists(donorPath))
             throw new FileNotFoundException("The base or donor database was not found.");
         string baseHash = FileHash(basePath), donorHash = FileHash(donorPath);
-        var cars = new List<WidebodyMergeCar>();
+        var cars = new Dictionary<long, WidebodyMergeCar>();
         using var con = new SqliteConnection(new SqliteConnectionStringBuilder
         { DataSource = basePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         con.Open();
@@ -58,11 +60,41 @@ public static partial class Merge
                             JOIN main.Data_Car b ON b.Id=d.Ordinal
                             WHERE d.IsStock=0
                             GROUP BY d.Ordinal,c.MediaName ORDER BY c.MediaName";
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-            cars.Add(new WidebodyMergeCar(reader.GetInt64(0), reader.GetString(1),
-                Convert.ToInt32(reader.GetInt64(2)), Convert.ToInt32(reader.GetInt64(3))));
-        return new WidebodyMergePreview(basePath, donorPath, baseHash, donorHash, cars);
+        using (var reader = cmd.ExecuteReader())
+            while (reader.Read())
+            {
+                var car = new WidebodyMergeCar(reader.GetInt64(0), reader.GetString(1),
+                    Convert.ToInt32(reader.GetInt64(2)), Convert.ToInt32(reader.GetInt64(3)), 0);
+                cars.Add(car.Ordinal, car);
+            }
+
+        // Stock-body options are independent of new kits. Include cars whose donor
+        // adds body parts or fitment to the existing stock CarBodyID, even when the
+        // donor has no additional widebody at all.
+        var stockQueries = WidebodyPartTables.Select(part =>
+            $"SELECT s.Ordinal FROM ov.List_UpgradeCarBody s " +
+            $"JOIN main.List_UpgradeCarBody b ON b.Ordinal=s.Ordinal AND b.IsStock=1 AND b.CarBodyID=s.CarBodyID " +
+            $"JOIN ov.{Q(part.Table)} p ON p.{Q(part.BodyColumn)}=s.CarBodyID " +
+            $"WHERE s.IsStock=1 AND p.IsStock=0 AND NOT EXISTS " +
+            $"(SELECT 1 FROM main.{Q(part.Table)} x WHERE x.Id=p.Id)").ToList();
+        stockQueries.Add("SELECT s.Ordinal FROM ov.List_UpgradeCarBody s " +
+            "JOIN main.List_UpgradeCarBody b ON b.Ordinal=s.Ordinal AND b.IsStock=1 AND b.CarBodyID=s.CarBodyID " +
+            "JOIN ov.List_UpgradeRearWing w ON w.Ordinal=s.Ordinal AND w.Id>=s.CarBodyID AND w.Id<s.CarBodyID+100 " +
+            "WHERE s.IsStock=1 AND w.IsStock=0 AND NOT EXISTS " +
+            "(SELECT 1 FROM main.List_UpgradeRearWing x WHERE x.Id=w.Id)");
+        cmd.CommandText = "SELECT n.Ordinal,COALESCE(c.MediaName,''),COUNT(*) FROM (" +
+            string.Join(" UNION ALL ", stockQueries) + ") n JOIN ov.Data_Car c ON c.Id=n.Ordinal " +
+            "JOIN main.Data_Car b ON b.Id=n.Ordinal GROUP BY n.Ordinal,c.MediaName";
+        using (var reader = cmd.ExecuteReader())
+            while (reader.Read())
+            {
+                long id = reader.GetInt64(0);
+                int newParts = Convert.ToInt32(reader.GetInt64(2));
+                if (cars.TryGetValue(id, out var car)) cars[id] = car with { NewStockPartCount = newParts };
+                else cars.Add(id, new WidebodyMergeCar(id, reader.GetString(1), 0, 0, newParts));
+            }
+        return new WidebodyMergePreview(basePath, donorPath, baseHash, donorHash,
+            cars.Values.OrderBy(car => car.MediaName, StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     public static int RunWidebodyCar(WidebodyMergePreview preview, long carId, string outputPath,
@@ -70,9 +102,10 @@ public static partial class Merge
                                       Action<string>? log = null)
     {
         if (!preview.Cars.Any(car => car.Ordinal == carId))
-            throw new InvalidOperationException("The selected car has no donor bodykits in this preview.");
-        if (!overrideConflicts && preview.Cars.Single(car => car.Ordinal == carId).NewKitCount == 0)
-            throw new InvalidOperationException("This car has no new kit IDs. Check override to import changed rows for existing kits.");
+            throw new InvalidOperationException("The selected car has no donor kits or stock-body options in this preview.");
+        var selectedCar = preview.Cars.Single(car => car.Ordinal == carId);
+        if (!overrideConflicts && selectedCar.NewKitCount == 0 && selectedCar.NewStockPartCount == 0)
+            throw new InvalidOperationException("This car has no new kit or stock-body option IDs. Check override to import changed rows for existing kits.");
         string output = Path.GetFullPath(outputPath);
         if (File.Exists(output) ||
             string.Equals(output, preview.BasePath, StringComparison.OrdinalIgnoreCase) ||
@@ -117,8 +150,43 @@ public static partial class Merge
                         using var reader = cmd.ExecuteReader();
                         while (reader.Read()) kits.Add((reader.GetInt64(0), reader.GetInt64(1)));
                     }
-                    if (kits.Count == 0)
-                        throw new InvalidOperationException("No new kits remain for this car.");
+
+                    // Copy newly added options for the car's existing stock body.
+                    // Do not replace the stock body itself or its factory stock rows.
+                    long stockBodyId;
+                    long stockPartId;
+                    using (var cmd = con.CreateCommand())
+                    {
+                        cmd.Transaction = tx;
+                        cmd.CommandText = @"SELECT d.CarBodyID,d.Id FROM ov.List_UpgradeCarBody d
+                                            JOIN main.List_UpgradeCarBody b ON b.Ordinal=d.Ordinal
+                                              AND b.CarBodyID=d.CarBodyID AND b.IsStock=1
+                                            WHERE d.Ordinal=$car AND d.IsStock=1";
+                        cmd.Parameters.AddWithValue("$car", carId);
+                        using var reader = cmd.ExecuteReader();
+                        if (!reader.Read()) throw new InvalidDataException("The donor and base do not share a stock CarBodyID for this car.");
+                        stockBodyId = reader.GetInt64(0);
+                        stockPartId = reader.GetInt64(1);
+                        if (reader.Read()) throw new InvalidDataException("This car has multiple stock CarBodyIDs; import manually.");
+                    }
+                    int stockOptions = 0;
+                    foreach (var (table, bodyColumn) in WidebodyPartTables)
+                    {
+                        var ids = ReadStockOptionIds(con, tx, table, bodyColumn, stockBodyId, overrideConflicts);
+                        foreach (long id in ids)
+                            stockOptions += CopyIdRow(con, tx, columnsCache, table, "Id", id,
+                                                      required: true, overrideConflicts);
+                    }
+                    written += stockOptions;
+                    var stockPresets = ReadIds(con, tx,
+                        "SELECT p.Id FROM ov.UpgradePresetPackages p WHERE p.Ordinal=$car AND p.CarBody=$kit " +
+                        "AND ($override=1 OR NOT EXISTS " +
+                        "(SELECT 1 FROM main.UpgradePresetPackages b WHERE b.Id=p.Id)) ORDER BY p.Id",
+                        carId, stockPartId, overrideConflicts ? 1 : 0);
+                    foreach (long id in stockPresets)
+                        written += CopyIdRow(con, tx, columnsCache, "UpgradePresetPackages", "Id", id,
+                                             required: true, overrideConflicts);
+                    log?.Invoke($"Car {carId}: processed stock-body options ({stockOptions} row(s) written).");
 
                     foreach (var (partId, bodyId) in kits)
                     {
@@ -164,7 +232,7 @@ public static partial class Merge
 
                     // A modded front bumper or wing may refer to custom aero tuning.
                     var aeroIds = new HashSet<long>();
-                    foreach (var (_, bodyId) in kits)
+                    foreach (var bodyId in kits.Select(kit => kit.BodyId).Append(stockBodyId))
                     {
                         foreach (long id in ReadIds(con, tx,
                             "SELECT AeroPhysicsID FROM ov.List_UpgradeCarBodyFrontBumper WHERE CarBodyID=$v", bodyId))
@@ -213,7 +281,8 @@ public static partial class Merge
             cmd.Parameters.AddWithValue("$car", sql.Contains("$v", StringComparison.Ordinal) ? values[1] : values[0]);
             if (sql.Contains("$v", StringComparison.Ordinal)) cmd.Parameters.AddWithValue("$v", values[0]);
             if (sql.Contains("$kit", StringComparison.Ordinal)) cmd.Parameters.AddWithValue("$kit", values[1]);
-            if (sql.Contains("$override", StringComparison.Ordinal)) cmd.Parameters.AddWithValue("$override", values[1]);
+            if (sql.Contains("$override", StringComparison.Ordinal))
+                cmd.Parameters.AddWithValue("$override", values[sql.Contains("$kit", StringComparison.Ordinal) ? 2 : 1]);
             if (sql.Contains("$lo", StringComparison.Ordinal))
             {
                 cmd.Parameters.AddWithValue("$lo", values[1]);
@@ -226,6 +295,23 @@ public static partial class Merge
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             if (!reader.IsDBNull(0)) ids.Add(reader.GetInt64(0));
+        return ids;
+    }
+
+    private static List<long> ReadStockOptionIds(SqliteConnection con, SqliteTransaction tx,
+                                                  string table, string bodyColumn, long bodyId,
+                                                  bool overrideConflicts)
+    {
+        using var cmd = con.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"SELECT p.Id FROM ov.{Q(table)} p WHERE p.{Q(bodyColumn)}=$body " +
+            $"AND p.IsStock=0 AND ($override=1 OR NOT EXISTS " +
+            $"(SELECT 1 FROM main.{Q(table)} b WHERE b.Id=p.Id)) ORDER BY p.Id";
+        cmd.Parameters.AddWithValue("$body", bodyId);
+        cmd.Parameters.AddWithValue("$override", overrideConflicts ? 1 : 0);
+        var ids = new List<long>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) ids.Add(reader.GetInt64(0));
         return ids;
     }
 

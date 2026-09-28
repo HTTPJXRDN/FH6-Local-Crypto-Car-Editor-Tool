@@ -523,12 +523,12 @@ public partial class MainWindow : Window
         if (!IsSqlite(donorPath))
             throw new InvalidOperationException("Widebody import needs a decrypted donor .sqlite file.");
 
-        Status("Finding donor widebody cars...");
+        Status("Finding donor widebody kits and stock-body options...");
         var preview = await Task.Run(() => Merge.PreviewWidebodyCars(baseDb, donorPath));
         if (preview.Cars.Count == 0)
         {
-            Log("No donor cars with widebody kits were found in the loaded base DB.");
-            Status("No donor widebody cars.");
+            Log("No donor cars with widebody kits or new stock-body options were found in the loaded base DB.");
+            Status("No new donor body options.");
             return;
         }
         var picker = new WidebodyMergeWindow(preview) { Owner = this };

@@ -33,7 +33,7 @@ public partial class WidebodyMergeWindow : Window
     {
         if (ImportButton is null) return;
         ImportButton.IsEnabled = CarChoices.SelectedItem is WidebodyMergeCar car &&
-                                 (car.NewKitCount > 0 || ReplaceConflicts);
+                                 (car.NewKitCount > 0 || car.NewStockPartCount > 0 || ReplaceConflicts);
     }
 
     private void Import_Click(object sender, RoutedEventArgs e)

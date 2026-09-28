@@ -35,13 +35,13 @@
             </Grid>
             <StackPanel Grid.Row="1" Margin="16,14,16,10">
                 <TextBlock x:Name="SourceText" FontSize="12" Foreground="{StaticResource Dim}" TextTrimming="CharacterEllipsis"/>
-                <TextBlock Text="Choose a donor car. This copies its new widebody rows and dependencies into a NEW database; the base and donor stay untouched."
+                <TextBlock Text="Choose a donor car. This copies its new widebody kits and stock-body part/fitment options into a NEW database; the base and donor stay untouched."
                            TextWrapping="Wrap" Margin="0,8,0,0"/>
                 <CheckBox x:Name="OverrideConflicts" Margin="0,10,0,0" Foreground="{StaticResource Pink}"
                           Content="Override conflicting rows for the selected car" Checked="Override_Changed"
                           Unchecked="Override_Changed"/>
                 <TextBlock Foreground="{StaticResource Dim}" FontSize="11" TextWrapping="Wrap" Margin="22,3,0,0"
-                           Text="Off: import only new kits and stop on conflicting IDs. On: donor rows replace matching bodykit, part, wing, preset, and aero rows for this car. Shared aero IDs can affect other cars."/>
+                           Text="Off: import only new kits/options and stop on conflicting IDs. On: donor rows replace matching bodykit, part, wing, preset, and aero rows for this car. Shared aero IDs can affect other cars."/>
             </StackPanel>
             <ListBox Grid.Row="2" x:Name="CarChoices" Margin="16,0,16,0" FontSize="13" Padding="7"
                      Background="#FF1F1F22" Foreground="#FFF4F4F6" BorderBrush="{StaticResource Line}"
