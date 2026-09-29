@@ -2177,8 +2177,7 @@ public partial class CarEditorView : UserControl
             if (values.Count >= MaxFit) return;
             clicks++;
             var backingValue = MakeNum((step * clicks).ToString("0.###", CultureInfo.CurrentCulture), relative: true);
-            backingValue.ToolTip = "Queued stock-relative step. Left-click the button to add another; right-click it to remove the last.";
-            panel.Children.Insert(panel.Children.IndexOf(preset), backingValue);
+            backingValue.Visibility = Visibility.Collapsed;
             values.Add(backingValue);
             queuedValues.Add(backingValue);
             RefreshButton();
@@ -2188,7 +2187,6 @@ public partial class CarEditorView : UserControl
             if (queuedValues.Count == 0) return;
             var backingValue = queuedValues[^1];
             queuedValues.RemoveAt(queuedValues.Count - 1);
-            panel.Children.Remove(backingValue);
             values.Remove(backingValue);
             clicks--;
             RefreshButton();
@@ -2216,16 +2214,16 @@ public partial class CarEditorView : UserControl
             list.Clear();
         }
 
-        AddFitmentStepButton(RFBoxes, _rf, "−1  smaller", -1, "Add progressively smaller rim options from each car's stock size.");
-        AddFitmentStepButton(RFBoxes, _rf, "+1  larger", 1, "Add progressively larger rim options from each car's stock size.");
+        AddFitmentStepButton(RFBoxes, _rf, "−1  smaller", -1, "Add rim options below each car's smallest current size.");
+        AddFitmentStepButton(RFBoxes, _rf, "+1  larger", 1, "Add rim options above each car's largest current size.");
 
-        AddFitmentStepButton(WFBoxes, _wf, "−10  narrower", -10, "Add progressively narrower front tire options from stock.");
-        AddFitmentStepButton(WFBoxes, _wf, "+10  wider", 10, "Add progressively wider front tire options from stock.");
-        AddFitmentStepButton(WRBoxes, _wr, "−10  narrower", -10, "Add progressively narrower rear tire options from stock.");
-        AddFitmentStepButton(WRBoxes, _wr, "+10  wider", 10, "Add progressively wider rear tire options from stock.");
+        AddFitmentStepButton(WFBoxes, _wf, "−10  narrower", -10, "Add front tire options below the narrowest current width.");
+        AddFitmentStepButton(WFBoxes, _wf, "+10  wider", 10, "Add front tire options above the widest current width.");
+        AddFitmentStepButton(WRBoxes, _wr, "−10  narrower", -10, "Add rear tire options below the narrowest current width.");
+        AddFitmentStepButton(WRBoxes, _wr, "+10  wider", 10, "Add rear tire options above the widest current width.");
 
-        AddFitmentStepButton(SWBoxes, _sw, "−2  lower", -2, "Add progressively lower tire-profile options from stock.");
-        AddFitmentStepButton(SWBoxes, _sw, "+2  taller", 2, "Add progressively taller tire-profile options from stock.");
+        AddFitmentStepButton(SWBoxes, _sw, "−2  lower", -2, "Add tire-profile options below the lowest current offset.");
+        AddFitmentStepButton(SWBoxes, _sw, "+2  taller", 2, "Add tire-profile options above the highest current offset.");
 
         AddFitmentStepButton(OFBoxes, _ofF, "+0.02 m  wider", 0.02, "Add progressive front-track extensions from the widest existing option.");
         AddFitmentStepButton(ORBoxes, _ofR, "+0.02 m  wider", 0.02, "Add progressive rear-track extensions from the widest existing option.");
@@ -2235,19 +2233,19 @@ public partial class CarEditorView : UserControl
 
     void AddSingleCarRimStepButtons()
     {
-        AddFitmentStepButton(RFBoxes, _rf, "−1  smaller", -1, "Queue another rim option relative to this car's stock size.");
-        AddFitmentStepButton(RFBoxes, _rf, "+1  larger", 1, "Queue another rim option relative to this car's stock size.");
+        AddFitmentStepButton(RFBoxes, _rf, "−1  smaller", -1, "Queue a rim option below this car's smallest current size.");
+        AddFitmentStepButton(RFBoxes, _rf, "+1  larger", 1, "Queue a rim option above this car's largest current size.");
     }
 
     void AddSingleCarBodyFitmentStepButtons()
     {
-        AddFitmentStepButton(WFBoxes, _wf, "−10  narrower", -10, "Queue another front tire option relative to this body's stock width.");
-        AddFitmentStepButton(WFBoxes, _wf, "+10  wider", 10, "Queue another front tire option relative to this body's stock width.");
-        AddFitmentStepButton(WRBoxes, _wr, "−10  narrower", -10, "Queue another rear tire option relative to this body's stock width.");
-        AddFitmentStepButton(WRBoxes, _wr, "+10  wider", 10, "Queue another rear tire option relative to this body's stock width.");
+        AddFitmentStepButton(WFBoxes, _wf, "−10  narrower", -10, "Queue a front tire option below this body's narrowest current width.");
+        AddFitmentStepButton(WFBoxes, _wf, "+10  wider", 10, "Queue a front tire option above this body's widest current width.");
+        AddFitmentStepButton(WRBoxes, _wr, "−10  narrower", -10, "Queue a rear tire option below this body's narrowest current width.");
+        AddFitmentStepButton(WRBoxes, _wr, "+10  wider", 10, "Queue a rear tire option above this body's widest current width.");
 
-        AddFitmentStepButton(SWBoxes, _sw, "−2  lower", -2, "Queue another tire-profile option relative to this body's stock profile.");
-        AddFitmentStepButton(SWBoxes, _sw, "+2  taller", 2, "Queue another tire-profile option relative to this body's stock profile.");
+        AddFitmentStepButton(SWBoxes, _sw, "−2  lower", -2, "Queue a tire-profile option below this body's lowest current offset.");
+        AddFitmentStepButton(SWBoxes, _sw, "+2  taller", 2, "Queue a tire-profile option above this body's highest current offset.");
 
         AddFitmentStepButton(OFBoxes, _ofF, "+0.02 m  wider", 0.02, "Queue another front-track option from this body's widest existing choice.");
         AddFitmentStepButton(ORBoxes, _ofR, "+0.02 m  wider", 0.02, "Queue another rear-track option from this body's widest existing choice.");
@@ -3188,15 +3186,17 @@ public partial class CarEditorView : UserControl
                     var entries = list.Select(box => (Value: OptNum(box), Relative: IsFitmentDelta(box)))
                         .Where(entry => entry.Value.HasValue).ToList();
                     bool appendMode = _batchRunning || entries.Any(entry => entry.Relative);
-                    var diameters = entries
-                        .Select(entry => entry.Relative && stock.HasValue
-                            ? checked((int)stock.Value + (int)Math.Round(entry.Value!.Value))
-                            : (int)Math.Round(entry.Value!.Value))
-                        .Where(v => v > 0 && (!stock.HasValue || v != stock.Value))
-                        .Distinct().OrderBy(v => v).ToList();
                     var existingRows = Query($"SELECT {col} v FROM \"{t}\" WHERE Ordinal=? AND IsStock=0", carId)
                         .Select(row => Convert.ToInt32(row["v"])).ToList();
                     var existing = existingRows.ToHashSet();
+                    int stockSize = checked((int)(stock ?? 0));
+                    var diameters = entries
+                        .Select(entry => entry.Relative
+                            ? checked((int)Math.Round(RelativeFitmentTarget(entry.Value!.Value,
+                                stockSize, existingRows.Select(value => (double)value))))
+                            : (int)Math.Round(entry.Value!.Value))
+                        .Where(v => v > 0 && (!stock.HasValue || v != stock.Value))
+                        .Distinct().OrderBy(v => v).ToList();
                     if (!appendMode)
                     {
                         // A second Apply with the same single-car values is a true
@@ -3223,7 +3223,7 @@ public partial class CarEditorView : UserControl
                 }
                 string sizes = string.Join(", ", _rf.Select(OptNum).Where(v => v.HasValue).Select(v => Math.Round(v!.Value)));
                 bool relativeRims = _rf.Any(IsFitmentDelta);
-                Log($"✓ shared front/rear rim sizes {(_batchRunning || relativeRims ? "added from stock-relative steps" : "set")}: [{sizes}]", "ok");
+                Log($"✓ shared front/rear rim sizes {(_batchRunning || relativeRims ? "extended from existing choices" : "set")}: [{sizes}]", "ok");
             }
 
             var fitBodies = SelectedBodies();   // active Stock/Widebody tab in the fitment card
@@ -3251,7 +3251,8 @@ public partial class CarEditorView : UserControl
                     bool appendMode = _batchRunning || widthEntries.Any(entry => entry.Relative);
                     var requestedWidths = widthEntries
                         .Select(entry => entry.Relative
-                            ? stockWidth + (long)Math.Round(entry.Value!.Value)
+                            ? checked((long)Math.Round(RelativeFitmentTarget(entry.Value!.Value,
+                                stockWidth, existingRows.Select(value => (double)value))))
                             : (long)Math.Round(entry.Value!.Value))
                         .Where(value => value > 0)
                         .Distinct().ToList();
@@ -3285,7 +3286,7 @@ public partial class CarEditorView : UserControl
                     SortUpgradeRowsByValue(t, "CarBodyId", bd, col);
                 }
                 bool relativeWidths = _wf.Any(IsFitmentDelta) || _wr.Any(IsFitmentDelta);
-                Log($"✓ tire widths {(_batchRunning || relativeWidths ? "added from stock-relative steps to" : "set on")} {fitBodies.Length} body/bodies", "ok");
+                Log($"✓ tire widths {(_batchRunning || relativeWidths ? "extended from existing choices on" : "set on")} {fitBodies.Length} body/bodies", "ok");
             }
 
             if (OptAspect.IsChecked == true)
@@ -3300,7 +3301,9 @@ public partial class CarEditorView : UserControl
                         .Select(row => Convert.ToDouble(row["v"])).ToList();
                     double stockValue = Convert.ToDouble(Scalar($"SELECT {col} FROM \"{t}\" WHERE CarBodyId=? AND IsStock=1 ORDER BY Id LIMIT 1", bd) ?? 0d);
                     var enteredValues = profileEntries.Select(entry => Math.Round(
-                            entry.Relative ? stockValue + entry.Value!.Value : entry.Value!.Value, 2)).ToList();
+                            entry.Relative
+                                ? RelativeFitmentTarget(entry.Value!.Value, stockValue, existing)
+                                : entry.Value!.Value, 2)).ToList();
                     var requestedValues = enteredValues.Distinct().ToList();
                     requestedValues.Sort();
                     if (!appendProfiles)
@@ -3329,7 +3332,7 @@ public partial class CarEditorView : UserControl
                     }
                     SortUpgradeRowsByValue(t, "CarBodyId", bd, col);
                 }
-                Log($"✓ tire profile offsets {(appendProfiles ? "added from stock-relative steps" : "set")}: " +
+                Log($"✓ tire profile offsets {(appendProfiles ? "extended from existing choices" : "set")}: " +
                     string.Join(", ", profileEntries.Select(entry => entry.Value!.Value)), "ok");
             }
 
@@ -3933,6 +3936,18 @@ public partial class CarEditorView : UserControl
             return false;
         }
         return true;
+    }
+
+    internal static double RelativeFitmentTarget(double delta, double stock,
+                                                  IEnumerable<double> existing)
+    {
+        // Step buttons extend the current menu, not the original stock value.
+        // Every queued delta is measured from the same pre-Apply extreme, so
+        // +1, +2, +3 becomes three successive options after the current max.
+        double anchor = stock;
+        foreach (double value in existing)
+            anchor = delta >= 0 ? Math.Max(anchor, value) : Math.Min(anchor, value);
+        return anchor + delta;
     }
 
     static double? OptNum(TextBox t) => NumericText.TryParseDouble(t.Text, out var v) ? v : (double?)null;  // blank -> skip; nonblank invalid is rejected before Apply
