@@ -1,0 +1,52 @@
+<Window x:Class="FH6LocalCryptoTool.CarRelatedImportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Import one car DB" Width="650" Height="340" MinWidth="540" MinHeight="300"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="CanResize"
+        Background="#FF1D1D1F" Foreground="#FFF4F4F6">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Pink" Color="#FFE8175D"/>
+        <SolidColorBrush x:Key="Dim" Color="#FF9C9CA2"/>
+        <SolidColorBrush x:Key="Line" Color="#FF3C3C40"/>
+        <Style x:Key="ButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="#FFF4F4F6"/>
+            <Setter Property="Background" Value="#FF333337"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{StaticResource Pink}"/></Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <Border BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="9" Background="#FF242427">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="44"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid Grid.Row="0" Background="#FF333337" MouseLeftButtonDown="Title_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Text="IMPORT ONE CAR DB" Foreground="{StaticResource Pink}" FontWeight="Bold"
+                           VerticalAlignment="Center" Margin="16,0"/>
+                <Button Grid.Column="1" Content="×" Width="42" FontSize="20" Background="Transparent"
+                        Foreground="{StaticResource Dim}" BorderThickness="0" Click="Cancel_Click"/>
+            </Grid>
+            <StackPanel Grid.Row="1" Margin="16,16,16,10">
+                <TextBlock x:Name="SourceText" Foreground="{StaticResource Dim}" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="CarText" Foreground="{StaticResource Pink}" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                <TextBlock x:Name="ChangesText" Margin="0,8,0,0"/>
+                <CheckBox x:Name="OverrideConflicts" IsChecked="True" Foreground="{StaticResource Pink}"
+                          Content="Use donor values for conflicting rows of this car" Margin="0,16,0,0"/>
+                <TextBlock Foreground="{StaticResource Dim}" FontSize="11" TextWrapping="Wrap" Margin="22,5,0,0"
+                           Text="The donor also includes stock and linked physics/engine records. Conflicting shared IDs can affect other cars. This adds or updates rows but does not delete base-only rows."/>
+            </StackPanel>
+            <Grid Grid.Row="2" Margin="16,12,16,16">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Foreground="{StaticResource Dim}" VerticalAlignment="Center" TextWrapping="Wrap"
+                           Text="A new output is created; neither source is overwritten."/>
+                <Button Grid.Column="1" Content="Cancel" Style="{StaticResource ButtonStyle}" Margin="12,0,8,0" Click="Cancel_Click"/>
+                <Button Grid.Column="2" Content="Import car" Style="{StaticResource ButtonStyle}"
+                        BorderBrush="{StaticResource Pink}" Click="Import_Click"/>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

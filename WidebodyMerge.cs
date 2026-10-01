@@ -49,6 +49,10 @@ public static partial class Merge
         { DataSource = basePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         con.Open();
         Exec(con, $"ATTACH DATABASE '{SqlPath(donorPath)}' AS ov;");
+        var donorTables = TableNames(con, "ov");
+        if (!donorTables.Contains("Data_Car") || !donorTables.Contains("List_UpgradeCarBody") ||
+            WidebodyPartTables.Any(part => !donorTables.Contains(part.Table)))
+            throw new InvalidDataException("This donor is missing car/body tables. Re-export it with the updated Export Car Related DB, or choose a complete GameDB donor.");
         using var cmd = con.CreateCommand();
         cmd.CommandText = @"SELECT d.Ordinal, COALESCE(c.MediaName, ''),
                                    SUM(CASE WHEN NOT EXISTS

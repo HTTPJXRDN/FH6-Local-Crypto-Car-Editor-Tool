@@ -1,8 +1,8 @@
-# FH6 Local Mod Tool v1.2.3
+# FH6 Local Mod Tool v1.2.4
 
 FH6 Local Mod Tool brings the FH6 crypto, car, animation, save-swap, and ProfileData tools together in one themed Windows desktop application.
 
-Download the self-contained Windows x64 executable from the v1.2.3 release assets, or build the source with the .NET 8 SDK.
+Download and extract `FH6LocalModTool_v1.2.4.zip` from the release assets, or build the source with the .NET 8 SDK. The package includes the self-contained Windows x64 executable and its animation helpers.
 
 ## Table of contents
 
@@ -15,6 +15,8 @@ Download the self-contained Windows x64 executable from the v1.2.3 release asset
 - [Which buttons require Apply?](#which-buttons-require-apply)
 - [Output-name cheat sheet](#output-name-cheat-sheet)
 - [Section 1: Crypto](#section-1-crypto)
+- [Share or import a car DB](#share-or-import-a-car-db)
+- [Merge after a game update](#merge-after-a-game-update)
 - [Section 2: Car Editor](#section-2-car-editor)
 - [Section 3: Animation Swap](#section-3-animation-swap)
 - [Section 4: Save Swap](#section-4-save-swap)
@@ -31,8 +33,11 @@ Download the self-contained Windows x64 executable from the v1.2.3 release asset
 - Decrypt, edit, and re-encrypt supported text assets such as INI, XML, JSON, TXT, and extensionless configuration files.
 - Decode unencrypted `.skeld` skeletons to editable JSON and rebuild validated binary copies.
 - Authenticate and extract encrypted ZIP entries.
-- Selectively merge another SQLite database into the staged GameDB.
+- Open and export an encrypted `.slt` directly in Car Editor; SQLite remains supported.
+- Selectively merge `.slt` or SQLite databases, including mixed-format inputs.
 - Select exactly which donor database tables and rows are merged into the staged database.
+- Export the selected car's related database rows and import that donor through **Import car DB**, with an optional conflict override.
+- Carry an old modded database onto a clean updated database through **Merge updated DB**, without depending on the embedded stock reference.
 - Edit car availability, prices, engines, motors, fitment, wheelbase, drivetrains, tires, suspension, handling, and per-engine power settings.
 - Batch-edit multiple cars with append-only, duplicate-safe upgrade creation.
 - Compare a loaded database against an embedded stock reference, filter modified cars, and restore individual cars.
@@ -59,7 +64,7 @@ The release executable supports Windows 10/11 x64 and does not require a separat
 
 ## Start here: a beginner's guide
 
-Download and extract `FH6LocalModTool_v1.2.3.zip` from the release assets, extract it, then run `FH6ModStudio.exe`. The ZIP keeps the animation helper files beside the executable. If downloading individual files instead, keep `acl_compressor.exe` and `forzatech_acl.dll` in the same folder as `FH6ModStudio.exe`. If building from source, run the resulting `FH6ModStudio.exe` instead.
+Download and extract `FH6LocalModTool_v1.2.4.zip` from the release assets, then run `FH6ModStudio.exe`. The ZIP keeps the animation helper files beside the executable. If downloading individual files instead, keep `acl_compressor.exe` and `forzatech_acl.dll` in the same folder as `FH6ModStudio.exe`. If building from source, run the resulting `FH6ModStudio.exe` instead.
 
 The tool has five tabs:
 
@@ -75,13 +80,12 @@ The tool has five tabs:
 
 ### The most important concept
 
-The GameDB has three stages:
+The GameDB can be handled in two ways:
 
-1. `gamedbRC.slt` is the encrypted game file.
-2. `gamedbRC.decrypted.sqlite` is the editable database created by this tool.
-3. A `.re-encrypted.slt` file is the rebuilt game file created after editing.
+1. Direct workflow: load the encrypted `gamedbRC.slt` in Car Editor and export a new `.slt`.
+2. SQLite workflow: decrypt to `.sqlite`, edit/export SQLite, then re-encrypt with the original SLT template.
 
-The Car Editor cannot directly edit the encrypted `.slt`. First decrypt the SLT, edit and export the SQLite database, and then re-encrypt the exported SQLite database.
+Both workflows use a private temporary SQLite working copy internally. The loaded file is never edited directly.
 
 ### Required GameDB folder setup
 
@@ -89,7 +93,7 @@ FH6 includes an original GameDB under `media\stripped`. Do not decrypt, edit, re
 
 ```text
 <FH6 install>\media\stripped\gamedbRC.slt    Original source — leave untouched
-<FH6 install>\MediaPC\stripped\gamedbRC.slt Working copy — decrypt and replace this one
+<FH6 install>\MediaPC\stripped\gamedbRC.slt Working copy — load this one in Car Editor
 ```
 
 Before copying, back up any `gamedbRC.slt` that already exists in `MediaPC\stripped`. It is also wise to keep an additional backup outside the game directory.
@@ -97,10 +101,10 @@ Before copying, back up any `gamedbRC.slt` that already exists in `MediaPC\strip
 The `MediaPC\stripped` working folder might eventually contain:
 
 ```text
-gamedbRC.slt                       Original encrypted template
-gamedbRC.decrypted.sqlite          Decrypted database
-gamedbRC_modified.sqlite           Database exported by Car Editor
-gamedbRC_modified.re-encrypted.slt Rebuilt encrypted database
+gamedbRC.slt                       Working encrypted GameDB
+gamedbRC_modified.slt              New file exported by Car Editor
+gamedbRC.decrypted.sqlite          Optional decrypted database
+gamedbRC_modified.sqlite           Optional SQLite export
 ```
 
 Never modify or delete the original under `media\stripped`. Use the copied `MediaPC\stripped\gamedbRC.slt` as the template when rebuilding your edited database.
@@ -130,50 +134,38 @@ Do not close the game while sitting in a car you are about to change in the data
 6. If `MediaPC\stripped\gamedbRC.slt` already exists, back it up before replacing it.
 7. From this point onward, use only the copy under `MediaPC\stripped`. Leave `media\stripped\gamedbRC.slt` untouched.
 
-### Part 2: decrypt the GameDB
+### Part 2: load the GameDB directly
 
 1. Open FH6 Local Mod Tool.
-2. Select the **Crypto** tab.
-3. Drag `MediaPC\stripped\gamedbRC.slt` into the large drop area. Do not drag the original from `media\stripped`.
-4. Look at the staged-file text. It should identify an `.slt` ready to decrypt.
-5. Click **Decrypt**.
-6. Wait until the activity log reports `Decrypted OK` and confirms a valid SQLite header.
-7. Find `gamedbRC.decrypted.sqlite` beside the copied SLT in `MediaPC\stripped`, unless you selected a different output folder.
-
-Do not rename or remove the copied `MediaPC\stripped\gamedbRC.slt` yet. The tool remembers that copy as the re-encryption template for the current session. The source file under `media\stripped` remains untouched.
+2. Select **Car Editor** and click **Load SLT / DB**.
+3. Select the copied `MediaPC\stripped\gamedbRC.slt`, not the original under `media\stripped`.
+4. Wait for the car list and database totals. The editor decrypts into a private working copy.
 
 ### Part 3: edit one car
 
 1. Select the **Car Editor** tab.
-2. Click **Load DB**.
-3. Select `gamedbRC.decrypted.sqlite`.
+2. Keep the copied `gamedbRC.slt` loaded from Part 2.
+3. Confirm the full loaded path shown beneath the Car Editor title.
 4. Wait for the car list and database totals to appear.
 5. Use the search box to find a car you own and can easily test.
 6. Click the car once to select it.
 7. Make one small change. For example, enable **Available in Autoshow** or add one sensible fitment option.
 8. If you changed Wheels & Fitment, Drivetrain, or Tires & Stance, review every checked option and click **APPLY changes to this car**. Autoshow, engine, motor, price, and handling actions do not need this Apply button.
 9. Read the activity log and confirm that the operation completed.
-10. Click **Export DB**.
-11. Save it with a new name such as `gamedbRC_modified.sqlite`.
+10. Click **Export SLT**.
+11. Save it with a new name such as `gamedbRC_modified.slt`.
 
-The database originally loaded into Car Editor is not modified directly. Your changes are saved to the file created by **Export DB**.
+The loaded SLT is not modified. The new SLT is built from the working copy, checked, and written separately.
 
-### Part 4: re-encrypt the edited database
+### Part 4: optional SQLite workflow
 
-1. Return to **Crypto**.
-2. Check the **DB template** field. It should point to the original `gamedbRC.slt` used earlier.
-3. If it is empty or incorrect, click **Browse** beside **DB template** and select that original SLT.
-4. Drag `gamedbRC_modified.sqlite` into the large drop area.
-5. Confirm that the staged-file text identifies a SQLite database ready to re-encrypt.
-6. Click **Re-encrypt**.
-7. Wait for the success message in the activity log.
-8. The new file will be named `gamedbRC_modified.re-encrypted.slt`.
+If you prefer SQLite, use **Crypto → Decrypt** first, load the decrypted `.sqlite` in Car Editor, and click **Export DB**. Then use **Crypto → Re-encrypt** with the original SLT template. You can also export `.sqlite` from an SLT-loaded editor. If you export an `.slt` from a SQLite-loaded editor, the tool asks for the original encrypted SLT template.
 
 ### Part 5: test the rebuilt file
 
 1. Make sure the game is closed.
 2. Back up the current `MediaPC\stripped\gamedbRC.slt` somewhere safe.
-3. Copy `gamedbRC_modified.re-encrypted.slt` into `MediaPC\stripped`.
+3. Copy the newly exported `gamedbRC_modified.slt` into `MediaPC\stripped` (or the re-encrypted SLT if you used the optional SQLite workflow).
 4. Rename the copied file to `gamedbRC.slt` so the game recognizes it.
 5. Start the game. It should load with the unrelated, unmodified car you selected before closing it.
 6. Do not select an old garage copy of the car you modified.
@@ -191,19 +183,20 @@ This distinction is important:
 
 - Checkbox-based fitment, drivetrain, tire, and stance options require **APPLY changes to this car**.
 - Engine, motor, Autoshow, FE-car, global-price, and enhanced-handling buttons change the temporary working database immediately.
-- Both kinds of changes still require **Export DB** before they exist in a new SQLite file.
-- The exported SQLite must then be re-encrypted before the game can use it.
+- Both kinds of changes still require **Export SLT** or **Export DB** to create a new file.
+- Direct SLT exports are ready to install after backup and testing; SQLite exports must be re-encrypted first.
 
 If a change does not appear in game, check this chain:
 
 ```text
-Choose option → Apply if required → Export DB → Re-encrypt exported DB → Install rebuilt SLT
+Choose option → Apply if required → Export SLT → Install the new SLT
 ```
 
 ## Output-name cheat sheet
 
 | Operation | Example input | Example output |
 |---|---|---|
+| Edit GameDB directly | `gamedbRC.slt` | `gamedbRC_modified.slt` |
 | Decrypt GameDB | `gamedbRC.slt` | `gamedbRC.decrypted.sqlite` |
 | Re-encrypt GameDB | `gamedbRC_modified.sqlite` | `gamedbRC_modified.re-encrypted.slt` |
 | Decrypt text asset | `PhysicsSettings.ini` | `PhysicsSettings.decrypted.ini` |
@@ -211,14 +204,17 @@ Choose option → Apply if required → Export DB → Re-encrypt exported DB →
 | Decode skeleton | `skeleton.skeld` | `skeleton.decrypted.skeld.json` |
 | Rebuild skeleton | `skeleton.decrypted.skeld.json` | `skeleton.modded.skeld` |
 | Extract encrypted ZIP | `Example.zip` | `Example.extracted` folder |
-| Merge database | `gamedbRC.decrypted.sqlite` | `gamedbRC.decrypted.merged.sqlite` |
+| Merge database | base `.slt` or `.sqlite` | new `.slt` or `.sqlite` matching the base |
+| Export car-related DB | modified `.slt` or `.sqlite` | selected car's merge-only `.sqlite` |
+| Import car DB | receiving `.slt` or `.sqlite` + car donor | new `.carmerge.<car-id>.<timestamp>.slt` or `.sqlite` |
+| Merge updated DB | clean update + old modded DB | new `.updatedmerge.<timestamp>.slt` or `.sqlite` |
 | Build save swap | target `C_ProfileData` | `C_ProfileData.swapped` |
 
 The tool does not overwrite the original input during these operations.
 
 ## Section 1: Crypto
 
-Use the **Crypto** tab for encrypted GameDB files, supported text assets, encrypted ZIP extraction, and database merging. Crypto is also the first and last step of the Car Editor workflow: decrypt the GameDB before editing it, then re-encrypt the exported database afterward.
+Use the **Crypto** tab for encrypted GameDB files, supported text assets, encrypted ZIP extraction, and database merging. Manual GameDB decrypt/re-encrypt is optional when Car Editor loads an SLT directly.
 
 For GameDB work, always use the copied file at `MediaPC\stripped\gamedbRC.slt`. Keep the original `media\stripped\gamedbRC.slt` untouched.
 
@@ -289,6 +285,29 @@ This conversion keeps the existing bone count and file layout. It does not add o
 
 The current interface decrypts and extracts supported ZIP entries. It does not rebuild a modified outer ZIP archive.
 
+### Share or import a car DB
+
+1. Finish editing the car and export your modified GameDB from Car Editor.
+2. Drop that modified `.slt` or `.sqlite` into Crypto's large top area.
+3. Click **Export Car Related DB**, select one car, and save the donor `.sqlite`.
+4. Share that donor with your car mod. It contains the car's related stock and modified rows, including bodies, parts, fitment, upgrades, presets, and linked engine/motor/physics records. It is a merge donor, not a GameDB to install or re-encrypt directly.
+5. To install it, put the receiving full GameDB in the top area and the exported car donor in the lower merge area.
+6. Click **Import car DB**. Enable **Use donor values for conflicting rows of this car** if you want the donor to replace the receiving DB's matching rows, then confirm to write a new output.
+
+The result follows the receiving DB's format: `.slt` in produces an encrypted `.slt`, and SQLite in produces SQLite. Shared engine or physics records can also affect other cars using them. The general **Merge** button remains available for manual table and row selection. See the [advanced merge reference](#merge-another-database) for details.
+
+### Merge after a game update
+
+1. Keep your old modded GameDB and obtain a clean GameDB for the newly installed game version.
+2. Drop the **clean updated DB into the top area**.
+3. Drop your **old modded DB into the lower merge area**.
+4. Click **Merge updated DB**, review the source names and preview, and confirm.
+5. Test the new output before using it as your active GameDB. Both original files remain available.
+
+The old modded DB wins for matching row IDs, while rows and tables found only in the clean update remain. The updated version stamp is retained. This action accepts SLT or SQLite in either area and produces the top file's format. It uses the two selected files, so replacing the app's embedded stock reference after an update does not affect it.
+
+This merge also copies unchanged old stock values over matching updated values. Official changes to existing cars or parts may therefore be overwritten; it does not identify only your modifications. Deleted donor rows cannot be inferred, and tables without primary keys may keep both versions of a changed row. See the [advanced update-merge reference](#merge-an-updated-game-database-with-your-old-modded-database) before merging an update that changes existing data.
+
 ### Crypto controls
 
 - **DB template** selects the original SLT used to frame a rebuilt GameDB.
@@ -302,7 +321,7 @@ The activity log confirms each staged, decrypted, re-encrypted, or extracted fil
 
 ## Section 2: Car Editor
 
-Use this section after creating a decrypted `.sqlite` GameDB through Crypto. Car Editor works on a temporary copy, so remember to export the database and re-encrypt that exported file when finished.
+Car Editor accepts an encrypted `.slt` or decrypted `.sqlite`. It works on a temporary SQLite copy and exports a new file; the loaded input stays untouched. An SLT input defaults to SLT output, while a SQLite input defaults to SQLite output.
 
 ![Car Editor before a database is loaded](Screenshots/car-editor-overview.png)
 
@@ -323,15 +342,15 @@ If you modified several cars, remain in a completely unrelated car until fresh c
 
 ### Load a database and choose a car
 
-1. Decrypt `gamedbRC.slt` into a `.sqlite` file first.
-2. Open **Car Editor**.
-3. Click **Load DB** and select the decrypted SQLite database.
+1. Open **Car Editor**.
+2. Click **Load SLT / DB** and select the copied `gamedbRC.slt` or a decrypted SQLite database.
+3. If using an SLT, the editor decrypts it into a private temporary SQLite file.
 4. The editor creates a temporary working copy. The selected file is not edited directly.
 5. Use the search field or type filter to find a vehicle.
 6. Filters include ICE, EV, ICE-to-EV, EV-to-ICE, bodykit presets, and cars modified relative to the embedded stock database. BaseCost and Autoshow availability are intentionally excluded from the Modified cars filter.
 7. Select a car and review its details.
 
-Changes remain in the temporary working database until **Export DB** is used.
+Changes remain in the temporary working database until **Export SLT** or **Export DB** is used.
 
 The editor carries a compressed stock GameDB reference inside the application. This enables the **Modified cars only** comparison and **Restore selected car from embedded stock DB** without asking the user to locate a separate stock database. Restoration is disabled in batch mode and for cars that do not exist in the embedded reference.
 
@@ -392,6 +411,8 @@ Engine mass and engine/motor upgrade tables are keyed by EngineID or MotorID. If
 4. Check only the sections the next Apply operation should write.
 5. Leave a box blank to skip it. Use **+** to add more absolute-value boxes, or use the repeatable step buttons to queue relative upgrades.
 
+Numeric boxes accept either `0.05` or `0,05` regardless of the PC's region. Prefilled values display using the PC's regional decimal separator, and the compact step buttons queue the same numeric values without extra boxes. Invalid nonblank fitment values stop Apply before any rows are changed.
+
 The **+** beside the body tabs can add a widebody kit only to a car that has no factory widebody kit. A new kit copies the required body data and stock/default part rows; it does not automatically create six extra bumpers, hoods, skirts, or wings. Cars with existing factory kits remain restricted because our tests found that adding another kit to them could crash the game. Keep an untouched database backup and test each added kit in-game before distributing it.
 
 The five **+ Add one** rows below the body tabs add one front bumper, rear bumper, side skirt, hood, or rear-wing option with a left-click. Right-click the same button to remove the last added non-stock option in the selected body's ID block. Stock-reference parts and parts used by an upgrade preset cannot be removed this way. The first four categories belong to the selected body. Rear wings are stored per car by the game, so a new wing is visible across that car's bodies even though its ID is allocated from the selected body's range. These database options are placeholders for modders to link to matching visual parts in their car files.
@@ -413,7 +434,7 @@ Available fields:
 - **Tire profile:** Front and rear aspect-ratio offsets. Negative values create a lower profile.
 - **Track width / offset:** Front and rear spacer offsets. Start small, such as `0.03`, `0.05`, or `0.08`.
 
-Single-car mode keeps the prefilled absolute boxes and also provides the same repeatable controls as batch mode: rims `−1`/`+1` inch, widths `−10`/`+10` mm, profiles `−2`/`+2`, and track `+0.02 m`. Each click queues another upgrade; right-click removes the last queued level. Tire-width, profile, and track steps apply only to the active **Stock body** or **Widebody** tab. Relative steps are append-only, preserve existing choices, and skip duplicates.
+Single-car mode keeps the prefilled absolute boxes and also provides the same repeatable controls as batch mode: rims `−1`/`+1` inch, widths `−10`/`+10` mm, profiles `−2`/`+2`, and track `+0.02 m`. Each click queues another upgrade beyond the current smallest or largest choice; right-click removes the last queued level. Tire-width, profile, and track steps apply only to the active **Stock body** or **Widebody** tab. Relative steps are append-only, preserve existing choices, and skip duplicates.
 
 **Reset fitment to stock (selected body)** removes non-stock tire-width, tire-profile, and track-offset options from the active body. It does not reset the shared rim-size list.
 
@@ -421,9 +442,9 @@ Single-car mode keeps the prefilled absolute boxes and also provides the same re
 
 Ctrl-click or Shift-click cars in the list to enter batch mode. Batch fitment preserves every stock and existing upgrade row and adds only genuinely new values.
 
-- Rim buttons add `−1` or `+1` inch per click from each car's stock diameter.
-- Front and rear tire-width buttons add `−10` or `+10` mm per click from each axle's stock width.
-- Tire-profile buttons add `−2` or `+2` points per click and may produce valid negative offsets.
+- Rim buttons add `−1` inch below the smallest or `+1` inch above the largest existing choice per click.
+- Front and rear tire-width buttons add `−10` mm below the narrowest or `+10` mm above the widest existing choice per click.
+- Tire-profile buttons add `−2` points below the lowest or `+2` points above the highest existing offset per click.
 - Track-width buttons add `+0.02 m` per click beyond each axle's widest existing option; no smaller-track preset is provided.
 - Each button may be clicked repeatedly. Its count shows the number of queued levels, and right-click removes the most recently queued level.
 - Queued values are stored from lowest to highest, including their database row ordering. Track choices advance in exact `0.02 m` steps from one fixed starting point.
@@ -472,16 +493,14 @@ Handling reversion is stored per car for the current session. Reloading the orig
 - Engine, motor, Autoshow, FE-car, price, and enhanced-handling buttons act immediately on the working copy.
 - Pending fitment inputs and repeatable step-button clicks remain in place when you apply engine or power changes; applying fitment does not clear pending power-builder inputs. You can prepare both sections before pressing their separate Apply buttons.
 - **Reload** discards current working changes and reloads the original selected database.
-- **Export DB** writes the working copy to a new `.sqlite` file.
+- **Export SLT / Export DB** writes a new encrypted `.slt` or decrypted `.sqlite`. The default matches the loaded format; a SQLite-to-SLT export asks for the original encrypted template.
 
 Recommended finish:
 
 1. Review the activity log for warnings or skipped operations.
-2. Click **Export DB** and use a new filename.
-3. Return to **Crypto**.
-4. Select the original matching SLT as the DB template.
-5. Re-encrypt the exported SQLite database.
-6. Back up the game's current SLT before installing and testing the rebuilt one.
+2. Click **Export SLT** when an SLT is loaded, or **Export DB** for SQLite.
+3. If you exported SQLite, return to Crypto and re-encrypt it with the matching original SLT template.
+4. Back up the game's current SLT before installing and testing the new one.
 
 ## Section 3: Animation Swap
 
@@ -661,7 +680,7 @@ Advanced edits can make a profile invalid even when the encrypted container rebu
 ### A change does not appear in game
 
 1. Confirm that **APPLY changes to this car** was clicked for checkbox-based options.
-2. Confirm that **Export DB** was clicked after editing.
+2. Confirm that **Export SLT** or **Export DB** was clicked after editing.
 3. Confirm that the exported database—not the original input—was re-encrypted.
 4. Confirm that the rebuilt SLT was renamed and placed in the correct game folder.
 5. Check whether Stock body was edited while a Widebody was being tested, or the reverse.
@@ -710,26 +729,30 @@ Save compatibility can still depend on the game build and the data inside each p
 
 ### Merge another database
 
-1. Decrypt a GameDB or drag a base `.sqlite` onto the main Crypto drop area.
-2. Drag another modded or updated `.sqlite` onto the smaller merge area.
+To share just one edited car, drag the modified `.slt` or `.sqlite` onto Crypto's main drop area. Click **Export Car Related DB**, choose the car, and save a new `.sqlite`. This creates a merge-only donor containing **all related rows for that car**, including its stock body and unchanged rows needed by the importers, its body-specific parts and fitment, car-wide upgrades, and linked engine/motor/physics records. The original DB stays untouched. The donor is not a complete game DB: do not re-encrypt it directly or use **Replace whole table**.
+
+To install this donor, stage the receiving `.slt` or `.sqlite` in the main drop area, stage the exported one-car `.sqlite` in the merge area, and click **Import car DB**. This is a separate one-click action; it does not open the general table/row picker. It creates a new output in the base format and lets you choose whether donor rows replace conflicts. New rows are added, matching rows are updated only when that option is checked, and base-only rows remain. An export made with an earlier sparse-export build must be exported again to use this action. Linked shared records can affect other cars after merging, so test the result in-game. Deleted rows in the source are not represented by this import.
+
+1. Drag a base `.slt` or decrypted `.sqlite` onto the main Crypto drop area.
+2. Drag another modded or updated `.slt` or `.sqlite` onto the smaller merge area. The two inputs may use different formats.
 3. Click **Merge** to open the themed selection window.
 4. Each listed table offers two different actions:
    - **Merge rows** selects new or changed donor rows. Matching rows are updated, new rows are added, and base-only rows remain.
    - **Replace whole table (drop + rebuild)** removes the staged table, recreates it from the donor schema, and copies the complete donor table. Use this only when the donor intentionally defines that entire table.
 5. Expand a table to choose individual rows, or use **Merge rows** to select all displayed row changes in that table.
 6. Review conflicts and base-only counts before confirming. Base-only rows are removed only from tables explicitly marked **Replace whole table**.
-7. Sparse patch databases containing only selected tables or rows should use **Merge rows**, never whole-table replacement.
-8. The output is named `<base-name>.modmerge.<timestamp>.sqlite` and is staged automatically for another merge or re-encryption.
+7. Partial donor databases containing only selected tables or rows should use **Merge rows**, never whole-table replacement.
+8. The output is staged automatically and matches the base format: `<base-name>.modmerge.<timestamp>.slt` for an SLT base or `.sqlite` for a SQLite base. The SLT path needs no separate re-encryption.
 
 ![Mod Merge table and row selection window](Screenshots/mod-merge-selection.png)
 
 The staged database remains the base, and neither source file is overwritten. Whole-table rebuilds preserve the donor table definition, keys, row IDs, indexes, and triggers, then verify the copied contents and SQLite integrity. Keep backups: structurally valid rows can still be incompatible with another mod or game build.
 
-### Import one modded car's widebodies
+### Merge an updated game database with your old modded database
 
-This is a **separate** Crypto action; the general **Merge** button above is unchanged. Load or decrypt your base GameDB in the main drop area, place a decrypted donor `.sqlite` in the merge area, then click **Import widebody car**. Select one donor car from the list. The importer writes a new `<base-name>.widebodymerge.<car-id>.<timestamp>.sqlite` and stages it for re-encryption; it does not overwrite either input.
+This is a **separate** Crypto action; the general **Merge** picker and **Import car DB** remain available. Put the clean GameDB from the new game update (`.slt` or `.sqlite`) in the **top** Crypto drop area. Put your **old modded** GameDB in the smaller **lower merge** area, then click **Merge updated DB**. Review the preview and confirm. The result is a new file in the top input's format; neither source is overwritten. The embedded stock DB is not used, so replacing it after a game update does not change this merge's reference.
 
-For that car, the focused import copies its non-stock body IDs, body data, body-specific bumpers, skirts and hoods, chassis/weight and tire-width/profile/track-spacing rows, relevant presets, and car-wide rear-wing options. It does not import unrelated cars or the car-wide rim-size and tire-compound tables. By default it imports only new kit IDs and refuses conflicting required row IDs. If you also want the donor's edits to existing kits or parts, check **Override conflicting rows for the selected car**. This opt-in setting replaces matching scoped rows in the *new output*; it refuses IDs owned by another car or body. Shared aero tuning IDs may also be replaced and can affect other cars, so review the result and test it in-game.
+Matching rows from your old modded DB win, while rows and tables found only in the new update stay. The new update's `VersionInfo` is kept. Car-part positions are overlaid by car/body to retain positions for new cars. Tables without primary keys are merged by complete row content, so an updated and an older variant may both remain. This is a **two-file overlay**, not a three-way comparison: it cannot tell your edits apart from unchanged old stock values. It may overwrite balance, fixes, or other values the update changed in existing rows. Use an untouched backup, inspect important changes, and test the new output in-game before replacing an active GameDB. Deleted rows from your old modded DB cannot be inferred or carried forward.
 
 ### Build from source
 
@@ -739,7 +762,7 @@ From the repository folder, run:
 dotnet build FH6ModTool.csproj -c Release
 ```
 
-The required runtime component is included in `lib` and is copied automatically during the build.
+The .NET 8 SDK restores the SQLite dependency during the build. The animation helper binaries and their licenses are included under `AnimationSwap/AclTools` and are copied to the build output. Keep `acl_compressor.exe` and `forzatech_acl.dll` beside the executable when distributing a published build.
 
 ## Video guide
 

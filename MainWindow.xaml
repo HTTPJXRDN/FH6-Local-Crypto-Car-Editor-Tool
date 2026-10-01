@@ -543,6 +543,8 @@
                                 Margin="0,0,10,0" Click="Decrypt_Click"/>
                         <Button Content="Re-encrypt" Style="{StaticResource PinkFilled}" MinWidth="104" Padding="14,5"
                                 Click="ReEncrypt_Click"/>
+                        <Button x:Name="ExportCarRelatedButton" Content="Export Car Related DB" Style="{StaticResource PinkButton}"
+                                MinWidth="176" Padding="14,5" Margin="10,0,0,0" Click="ExportCarRelated_Click"/>
                     </StackPanel>
                 </StackPanel>
             </Grid>
@@ -597,7 +599,7 @@
         </Grid>
 
         <!-- ===== Merge zone ===== -->
-        <Border x:Name="MergeBorder" Grid.Row="5" Height="118" Margin="0,16,0,0"
+        <Border x:Name="MergeBorder" Grid.Row="5" Height="150" Margin="0,16,0,0"
                 Style="{StaticResource PremiumCard}" AllowDrop="True"
                 DragEnter="Drop_DragEnter" DragOver="Drop_DragOver"
                 DragLeave="Drop_DragLeave" Drop="Merge_Drop">
@@ -614,18 +616,20 @@
                 </Viewbox>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock TextWrapping="Wrap" FontSize="14">
-                        <Run Text="Optional:" Foreground="{StaticResource Pink}" FontWeight="SemiBold"/><Run Text="  drop another modded or updated .sqlite here" Foreground="{StaticResource Dim}"/>
+                        <Run Text="Optional:" Foreground="{StaticResource Pink}" FontWeight="SemiBold"/><Run Text="  drop another modded or updated .slt / .sqlite here" Foreground="{StaticResource Dim}"/>
                     </TextBlock>
                     <TextBlock x:Name="MergeStagedText" Visibility="Collapsed" Foreground="{StaticResource Pink}"
                                FontSize="12.5" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Text="General Merge keeps its table/row picker. Widebody import copies one donor car's kit rows."
+                    <TextBlock Text="For Merge updated DB: clean update on top, old modded DB here."
                                Foreground="{StaticResource Dim}" FontSize="12.5" Margin="0,6,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="12,0,0,0">
-                    <Button Content="Merge" Style="{StaticResource PinkButton}" MinWidth="145"
+                    <Button x:Name="MergeBtn" Content="Merge" Style="{StaticResource PinkButton}" MinWidth="145"
                             Click="Merge_Click"/>
-                    <Button x:Name="WidebodyMergeBtn" Content="Import widebody car" Style="{StaticResource PinkButton}" MinWidth="145"
-                            Margin="0,7,0,0" Click="WidebodyMerge_Click"/>
+                    <Button x:Name="UpdateMergeBtn" Content="Merge updated DB" Style="{StaticResource PinkButton}" MinWidth="145"
+                            Margin="0,7,0,0" Click="UpdateMerge_Click"/>
+                    <Button x:Name="CarRelatedImportBtn" Content="Import car DB" Style="{StaticResource PinkButton}" MinWidth="145"
+                            Margin="0,7,0,0" Click="CarRelatedImport_Click"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -732,7 +736,7 @@
         <pe:ProfileEditorView/>
       </TabItem>
     </TabControl>
-        <TextBlock Grid.Row="2" Panel.ZIndex="20" Text="V1.2.3"
+        <TextBlock Grid.Row="2" Panel.ZIndex="20" Text="V1.2.4"
                    HorizontalAlignment="Right" VerticalAlignment="Top"
                    Margin="0,10,15,0" Foreground="{StaticResource Faint}"
                    FontSize="10.5" FontWeight="SemiBold" IsHitTestVisible="False"/>

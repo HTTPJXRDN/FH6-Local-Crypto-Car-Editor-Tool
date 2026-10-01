@@ -86,7 +86,7 @@ public partial class MainWindow : Window
 
         KeyCombo.ItemsSource = Fh6Keys.Keys.Select(k => k.Usage).ToArray();
         KeyCombo.SelectedItem = "GameDB";
-        Log("Ready. Drop a file onto a zone, then click Decrypt, Re-encrypt, or Merge.");
+        Log("Ready. Drop a file onto a zone, then click Decrypt, Re-encrypt, Export Car Related DB, or Merge.");
     }
 
     // ---------- dark native title bar (Win10 1809+ / Win11) ----------
@@ -192,6 +192,7 @@ public partial class MainWindow : Window
                     : ".slt → Decrypt";
         StagedText.Text = $"Staged: {Path.GetFileName(path)}   ({what})";
         StagedText.Visibility = Visibility.Visible;
+        if (sqlite) Log("Decrypted DB staged. Re-encrypt it, or click Export Car Related DB to make a one-car merge donor.");
         Log($"Staged {Path.GetFileName(path)} — click {((sqlite || plainText || skeldJson) ? "Re-encrypt" : "Decrypt")} to run.{((zip || asset || plainText) ? " General key selected automatically." : "")}");
         Status("File staged.");
     }
@@ -280,30 +281,102 @@ public partial class MainWindow : Window
         catch (Exception ex) { Fail(ex, src); }
     }
 
-    private void Merge_Click(object sender, RoutedEventArgs e)
+    private async void ExportCarRelated_Click(object sender, RoutedEventArgs e)
     {
+        if (!ExportCarRelatedButton.IsEnabled) return;
+        string? src = _pendingInput;
+        if (src is null || (!IsSqlite(src) && !GameDbSqliteBridge.IsSlt(src)) || !File.Exists(src))
+        {
+            Log("Export Car Related DB needs a GameDB .slt or decrypted .sqlite dropped on the top Crypto zone.");
+            Status("Stage a GameDB first.");
+            return;
+        }
+        ExportCarRelatedButton.IsEnabled = false;
+        try
+        {
+            Status("Preparing staged GameDB...");
+            using var sourceDb = await Task.Run(() => GameDbSqliteBridge.Materialize(src));
+            Status("Reading cars from staged database...");
+            var cars = await Task.Run(() => CarRelatedDbExport.ListCars(sourceDb.SqlitePath));
+            if (cars.Count == 0) throw new InvalidOperationException("No cars were found in the staged database.");
+            var picker = new CarRelatedExportWindow(src, cars) { Owner = this };
+            if (picker.ShowDialog() != true || picker.SelectedCarId is not long carId)
+            {
+                Status("Car-related export cancelled.");
+                return;
+            }
+            var save = new SaveFileDialog
+            {
+                Title = "Save car-related merge donor",
+                Filter = "SQLite database (*.sqlite)|*.sqlite",
+                DefaultExt = ".sqlite",
+                AddExtension = true,
+                InitialDirectory = OutputDirFor(src),
+                FileName = $"car-{carId}.related.sqlite",
+                OverwritePrompt = false
+            };
+            if (save.ShowDialog(this) != true)
+            {
+                Status("Car-related export cancelled.");
+                return;
+            }
+            if (File.Exists(save.FileName))
+                throw new IOException("That output file already exists. Please choose a new name; no file was overwritten.");
+            sourceDb.VerifySourceUnchanged();
+            Status($"Exporting all related rows for car {carId}...");
+            Log($"Exporting all related rows for car {carId} from {Path.GetFileName(src)}...");
+            var result = await Task.Run(() => CarRelatedDbExport.Export(sourceDb.SqlitePath, carId, save.FileName));
+            Log($"Created single-car donor: {Path.GetFileName(result.Path)} ({result.Rows:n0} rows in {result.Tables} tables).");
+            foreach (string warning in result.Warnings) Log("    " + warning);
+            Log("Drop this .sqlite in the merge donor zone and click Import car DB. It is not game-ready by itself.");
+            Done(result.Path, "Car-related donor exported.");
+        }
+        catch (Exception ex) { Fail(ex, src); }
+        finally { ExportCarRelatedButton.IsEnabled = true; }
+    }
+
+    private async void Merge_Click(object sender, RoutedEventArgs e)
+    {
+        if (!MergeBtn.IsEnabled) return;
         if (_pendingOverlay is null)
         {
-            Log("No donor staged — drop a decrypted .sqlite onto the merge zone first.");
+            Log("No donor staged — drop a .slt or decrypted .sqlite onto the merge zone first.");
             Status("Nothing to merge.");
             return;
         }
-        try { MergeFlow(_pendingOverlay); } catch (Exception ex) { Fail(ex, _pendingOverlay); }
+        MergeBtn.IsEnabled = UpdateMergeBtn.IsEnabled = CarRelatedImportBtn.IsEnabled = false;
+        try { await MergeFlow(_pendingOverlay); } catch (Exception ex) { Fail(ex, _pendingOverlay); }
+        finally { MergeBtn.IsEnabled = UpdateMergeBtn.IsEnabled = CarRelatedImportBtn.IsEnabled = true; }
     }
 
-    private async void WidebodyMerge_Click(object sender, RoutedEventArgs e)
+    private async void UpdateMerge_Click(object sender, RoutedEventArgs e)
     {
-        if (!WidebodyMergeBtn.IsEnabled) return;
+        if (!UpdateMergeBtn.IsEnabled) return;
         if (_pendingOverlay is null)
         {
-            Log("No donor staged - drop a decrypted .sqlite onto the merge zone first.");
+            Log("Drop your old modded GameDB onto the merge zone first.");
+            Status("No modded DB staged.");
+            return;
+        }
+        MergeBtn.IsEnabled = UpdateMergeBtn.IsEnabled = CarRelatedImportBtn.IsEnabled = false;
+        try { await GameUpdateMergeFlow(_pendingOverlay); }
+        catch (Exception ex) { Fail(ex, _pendingOverlay); }
+        finally { MergeBtn.IsEnabled = UpdateMergeBtn.IsEnabled = CarRelatedImportBtn.IsEnabled = true; }
+    }
+
+    private async void CarRelatedImport_Click(object sender, RoutedEventArgs e)
+    {
+        if (!CarRelatedImportBtn.IsEnabled) return;
+        if (_pendingOverlay is null)
+        {
+            Log("No donor staged - drop an exported single-car .sqlite onto the merge zone first.");
             Status("Nothing to import.");
             return;
         }
-        WidebodyMergeBtn.IsEnabled = false;
-        try { await WidebodyMergeFlow(_pendingOverlay); }
+        MergeBtn.IsEnabled = UpdateMergeBtn.IsEnabled = CarRelatedImportBtn.IsEnabled = false;
+        try { await CarRelatedImportFlow(_pendingOverlay); }
         catch (Exception ex) { Fail(ex, _pendingOverlay); }
-        finally { WidebodyMergeBtn.IsEnabled = true; }
+        finally { MergeBtn.IsEnabled = UpdateMergeBtn.IsEnabled = CarRelatedImportBtn.IsEnabled = true; }
     }
 
     // ---------- flows ----------
@@ -471,24 +544,31 @@ public partial class MainWindow : Window
         Done(outPath, "Asset re-encrypted OK.");
     }
 
-    private void MergeFlow(string overlayPath)
+    private string? ResolveMergeBase() =>
+        _pendingInput is not null && (IsSqlite(_pendingInput) || GameDbSqliteBridge.IsSlt(_pendingInput))
+            ? _pendingInput : _lastDecryptedSqlite;
+
+    private static void RequireMergeInput(string path)
     {
-        // Base = whatever .sqlite is in the top zone: prefer the file staged there,
-        // otherwise fall back to the last DB we decrypted/merged.
-        string? baseDb = (_pendingInput is not null && IsSqlite(_pendingInput))
-            ? _pendingInput
-            : _lastDecryptedSqlite;
-        if (baseDb is null || !File.Exists(baseDb))
-        {
-            Log("Merge needs a base DB in the top zone — decrypt a .slt or drop a .sqlite there first, then drop the overlay here.");
-            Status("No base DB for merge.");
-            return;
-        }
-        if (!IsSqlite(overlayPath))
-            throw new InvalidOperationException("Merge needs a decrypted donor .sqlite file.");
-        Status($"Comparing {Path.GetFileName(overlayPath)}…");
-        Log($"Previewing donor {Path.GetFileName(overlayPath)} against {Path.GetFileName(baseDb)}…");
-        var preview = Merge.PreviewMods(baseDb, overlayPath);
+        if (!File.Exists(path) || (!IsSqlite(path) && !GameDbSqliteBridge.IsSlt(path)))
+            throw new InvalidOperationException("Merge needs a GameDB .slt or decrypted SQLite donor.");
+    }
+
+    private async Task MergeFlow(string overlayPath)
+    {
+        string? basePath = ResolveMergeBase();
+        if (basePath is null || !File.Exists(basePath))
+            throw new InvalidOperationException("Drop a base .slt or decrypted .sqlite onto the top Crypto zone first.");
+        RequireMergeInput(overlayPath);
+        if (string.Equals(Path.GetFullPath(basePath), Path.GetFullPath(overlayPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Base and donor must be different files.");
+
+        Status("Preparing databases for merge...");
+        using var baseDb = await Task.Run(() => GameDbSqliteBridge.Materialize(basePath));
+        using var donorDb = await Task.Run(() => GameDbSqliteBridge.Materialize(overlayPath));
+        Status($"Comparing {Path.GetFileName(overlayPath)}...");
+        Log($"Previewing donor {Path.GetFileName(overlayPath)} against {Path.GetFileName(basePath)}...");
+        var preview = await Task.Run(() => Merge.PreviewMods(baseDb.SqlitePath, donorDb.SqlitePath));
         foreach (string warning in preview.Warnings) Log("    Skipped: " + warning);
         if (preview.Tables.Count == 0)
         {
@@ -496,67 +576,208 @@ public partial class MainWindow : Window
             Status("No selectable changes.");
             return;
         }
-        var picker = new MergeSelectionWindow(preview) { Owner = this };
+        var picker = new MergeSelectionWindow(preview, basePath, overlayPath) { Owner = this };
         if (picker.ShowDialog() != true) { Status("Merge cancelled."); return; }
-        string outPath = UniqueMergeOutput(baseDb);
-        Status($"Merging {picker.SelectedRows.Count:n0} selected donor rows and " +
-               $"{picker.ReplacementTables.Count:n0} whole-table rebuild(s)…");
-        Log($"Importing {picker.SelectedRows.Count:n0} selected rows and " +
-            $"{picker.ReplacementTables.Count:n0} whole-table rebuild(s) into a new database…");
-        Merge.RunSelected(preview, picker.SelectedRows, picker.ReplacementTables, outPath,
-            msg => Log("    " + msg));
 
-        _lastDecryptedSqlite = outPath; // chain further merges onto the result
-        _pendingInput = outPath;        // stage it so Re-encrypt is ready immediately
-        StagedText.Text = $"Staged: {Path.GetFileName(outPath)}   (.sqlite → Re-encrypt)";
+        bool sltOutput = GameDbSqliteBridge.IsSlt(basePath);
+        string outPath = UniqueMergeOutput(basePath, sltOutput ? ".slt" : ".sqlite");
+        string sqliteOutput = sltOutput
+            ? Path.Combine(Path.GetTempPath(), "fh6_mod_studio_slt_merge_" + Guid.NewGuid().ToString("N") + ".sqlite")
+            : outPath;
+        using var tempOutput = sltOutput
+            ? new GameDbSqliteBridge.MaterializedDatabase(sqliteOutput, null, true) : null;
+        baseDb.VerifySourceUnchanged();
+        donorDb.VerifySourceUnchanged();
+        Status($"Merging {picker.SelectedRows.Count:n0} selected donor rows and " +
+               $"{picker.ReplacementTables.Count:n0} whole-table rebuild(s)...");
+        Log($"Importing {picker.SelectedRows.Count:n0} selected rows and " +
+            $"{picker.ReplacementTables.Count:n0} whole-table rebuild(s) into a new database...");
+        await Task.Run(() => Merge.RunSelected(preview, picker.SelectedRows, picker.ReplacementTables, sqliteOutput,
+            msg => Dispatcher.Invoke(() => Log("    " + msg))));
+        if (sltOutput)
+        {
+            baseDb.VerifySourceUnchanged();
+            Status("Encrypting merged GameDB...");
+            await Task.Run(() => GameDbSqliteBridge.EncryptSnapshot(sqliteOutput, basePath, outPath));
+        }
+
+        _lastDecryptedSqlite = sltOutput ? null : outPath;
+        _pendingInput = outPath;
+        if (sltOutput) { _templateSlt = outPath; TemplateText.Text = outPath; }
+        StagedText.Text = sltOutput
+            ? $"Staged: {Path.GetFileName(outPath)}   (.slt — ready for another merge)"
+            : $"Staged: {Path.GetFileName(outPath)}   (.sqlite → Re-encrypt)";
         StagedText.Visibility = Visibility.Visible;
-        Log($"    -> {Path.GetFileName(outPath)}   (staged — click Re-encrypt, or drop another overlay to keep merging)");
+        Log($"    -> {Path.GetFileName(outPath)} (staged for another merge{(sltOutput ? "" : " or Re-encrypt")})");
         Done(outPath, "Merge complete.");
+    }
+
+    private async Task GameUpdateMergeFlow(string moddedPath)
+    {
+        string? updatedPath = ResolveMergeBase();
+        if (updatedPath is null || !File.Exists(updatedPath))
+            throw new InvalidOperationException("Drop the clean updated GameDB .slt or .sqlite onto the top Crypto zone first.");
+        RequireMergeInput(moddedPath);
+        if (string.Equals(Path.GetFullPath(moddedPath), Path.GetFullPath(updatedPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Your modded DB and clean updated DB must be different files.");
+        Status("Preparing clean updated and old modded databases...");
+        using var updatedDb = await Task.Run(() => GameDbSqliteBridge.Materialize(updatedPath));
+        using var moddedDb = await Task.Run(() => GameDbSqliteBridge.Materialize(moddedPath));
+        Status("Checking schemas and donor differences...");
+        var preview = await Task.Run(() => UpdateDbMerge.Preview(updatedDb.SqlitePath, moddedDb.SqlitePath));
+        var picker = new UpdateDbMergeWindow(preview, updatedPath, moddedPath) { Owner = this };
+        if (picker.ShowDialog() != true) { Status("Update merge cancelled."); return; }
+
+        bool sltOutput = GameDbSqliteBridge.IsSlt(updatedPath);
+        string stem = Path.GetFileNameWithoutExtension(updatedPath) + ".updatedmerge." +
+                      DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string outPath = UniqueOutputPath(Path.Combine(OutputDirFor(updatedPath), stem + (sltOutput ? ".slt" : ".sqlite")));
+        string sqliteOutput = sltOutput
+            ? Path.Combine(Path.GetTempPath(), "fh6_mod_studio_slt_update_" + Guid.NewGuid().ToString("N") + ".sqlite")
+            : outPath;
+        using var tempOutput = sltOutput
+            ? new GameDbSqliteBridge.MaterializedDatabase(sqliteOutput, null, true) : null;
+        updatedDb.VerifySourceUnchanged();
+        moddedDb.VerifySourceUnchanged();
+        Status("Overlaying modded rows onto the clean update...");
+        await Task.Run(() => UpdateDbMerge.Run(preview, sqliteOutput,
+            msg => Dispatcher.Invoke(() => Log("    " + msg))));
+        if (sltOutput)
+        {
+            updatedDb.VerifySourceUnchanged();
+            Status("Encrypting the updated GameDB...");
+            await Task.Run(() => GameDbSqliteBridge.EncryptSnapshot(sqliteOutput, updatedPath, outPath));
+        }
+        _lastDecryptedSqlite = sltOutput ? null : outPath;
+        _pendingInput = outPath;
+        if (sltOutput) { _templateSlt = outPath; TemplateText.Text = outPath; }
+        StagedText.Text = $"Staged: {Path.GetFileName(outPath)}";
+        StagedText.Visibility = Visibility.Visible;
+        Log($"Updated DB merged with {Path.GetFileName(moddedPath)} -> {Path.GetFileName(outPath)}. Embedded stock DB was not used.");
+        Done(outPath, "Updated DB merge complete.");
     }
 
     private async Task WidebodyMergeFlow(string donorPath)
     {
-        string? baseDb = (_pendingInput is not null && IsSqlite(_pendingInput))
-            ? _pendingInput : _lastDecryptedSqlite;
-        if (baseDb is null || !File.Exists(baseDb))
-            throw new InvalidOperationException("Load or decrypt a base .sqlite in the top zone first.");
-        if (!IsSqlite(donorPath))
-            throw new InvalidOperationException("Widebody import needs a decrypted donor .sqlite file.");
+        string? basePath = ResolveMergeBase();
+        if (basePath is null || !File.Exists(basePath))
+            throw new InvalidOperationException("Drop a base .slt or decrypted .sqlite onto the top Crypto zone first.");
+        RequireMergeInput(donorPath);
+        if (string.Equals(Path.GetFullPath(basePath), Path.GetFullPath(donorPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Base and donor must be different files.");
 
+        Status("Preparing databases for widebody import...");
+        using var baseDb = await Task.Run(() => GameDbSqliteBridge.Materialize(basePath));
+        using var donorDb = await Task.Run(() => GameDbSqliteBridge.Materialize(donorPath));
         Status("Finding donor widebody kits and stock-body options...");
-        var preview = await Task.Run(() => Merge.PreviewWidebodyCars(baseDb, donorPath));
+        var preview = await Task.Run(() => Merge.PreviewWidebodyCars(baseDb.SqlitePath, donorDb.SqlitePath));
         if (preview.Cars.Count == 0)
         {
             Log("No donor cars with widebody kits or new stock-body options were found in the loaded base DB.");
             Status("No new donor body options.");
             return;
         }
-        var picker = new WidebodyMergeWindow(preview) { Owner = this };
+        var picker = new WidebodyMergeWindow(preview, basePath, donorPath) { Owner = this };
         if (picker.ShowDialog() != true || picker.SelectedCarId is not long carId)
         { Status("Widebody import cancelled."); return; }
 
-        string dir = OutputDirFor(baseDb);
-        string stem = Path.GetFileNameWithoutExtension(baseDb) + ".widebodymerge." +
+        bool sltOutput = GameDbSqliteBridge.IsSlt(basePath);
+        string dir = OutputDirFor(basePath);
+        string stem = Path.GetFileNameWithoutExtension(basePath) + ".widebodymerge." +
                       carId + "." + DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        string outPath = UniqueOutputPath(Path.Combine(dir, stem + ".sqlite"));
+        string outPath = UniqueOutputPath(Path.Combine(dir, stem + (sltOutput ? ".slt" : ".sqlite")));
+        string sqliteOutput = sltOutput
+            ? Path.Combine(Path.GetTempPath(), "fh6_mod_studio_slt_widebody_" + Guid.NewGuid().ToString("N") + ".sqlite")
+            : outPath;
+        using var tempOutput = sltOutput
+            ? new GameDbSqliteBridge.MaterializedDatabase(sqliteOutput, null, true) : null;
+        baseDb.VerifySourceUnchanged();
+        donorDb.VerifySourceUnchanged();
         Status($"Importing car {carId} widebody rows...");
-        int rows = await Task.Run(() => Merge.RunWidebodyCar(preview, carId, outPath,
+        int rows = await Task.Run(() => Merge.RunWidebodyCar(preview, carId, sqliteOutput,
             picker.ReplaceConflicts,
             msg => Dispatcher.Invoke(() => Log("    " + msg))));
-        _lastDecryptedSqlite = outPath;
+        if (sltOutput)
+        {
+            baseDb.VerifySourceUnchanged();
+            Status("Encrypting widebody-import GameDB...");
+            await Task.Run(() => GameDbSqliteBridge.EncryptSnapshot(sqliteOutput, basePath, outPath));
+        }
+        _lastDecryptedSqlite = sltOutput ? null : outPath;
         _pendingInput = outPath;
-        StagedText.Text = $"Staged: {Path.GetFileName(outPath)}   (.sqlite -> Re-encrypt)";
+        if (sltOutput) { _templateSlt = outPath; TemplateText.Text = outPath; }
+        StagedText.Text = sltOutput
+            ? $"Staged: {Path.GetFileName(outPath)}   (.slt — ready for another merge)"
+            : $"Staged: {Path.GetFileName(outPath)}   (.sqlite → Re-encrypt)";
         StagedText.Visibility = Visibility.Visible;
-        Log($"Imported {rows:n0} row(s) for car {carId} into {Path.GetFileName(outPath)}; click Re-encrypt when ready.");
+        Log($"Imported {rows:n0} row(s) for car {carId} into {Path.GetFileName(outPath)}.");
         Done(outPath, "Widebody car import complete.");
     }
 
-    private string UniqueMergeOutput(string baseDb)
+    private async Task CarRelatedImportFlow(string donorPath)
+    {
+        string? basePath = ResolveMergeBase();
+        if (basePath is null || !File.Exists(basePath))
+            throw new InvalidOperationException("Drop a base GameDB .slt or .sqlite onto the top Crypto zone first.");
+        RequireMergeInput(donorPath);
+        if (string.Equals(Path.GetFullPath(basePath), Path.GetFullPath(donorPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Base and donor must be different files.");
+
+        Status("Preparing single-car import...");
+        using var baseDb = await Task.Run(() => GameDbSqliteBridge.Materialize(basePath));
+        using var donorDb = await Task.Run(() => GameDbSqliteBridge.Materialize(donorPath));
+        var car = await Task.Run(() => CarRelatedDbExport.ReadSingleCarDonor(donorDb.SqlitePath));
+        Status($"Comparing car {car.Id} rows...");
+        var preview = await Task.Run(() => Merge.PreviewMods(baseDb.SqlitePath, donorDb.SqlitePath));
+        if (preview.Warnings.Count > 0)
+            throw new InvalidDataException("Some donor tables could not be compared; import stopped to avoid a partial car: " +
+                                           string.Join("; ", preview.Warnings.Take(3)));
+        var picker = new CarRelatedImportWindow(car, preview, basePath, donorPath) { Owner = this };
+        if (picker.ShowDialog() != true) { Status("Car import cancelled."); return; }
+        var selected = preview.Tables.SelectMany(t => t.Rows)
+            .Where(r => picker.ReplaceConflicts || !r.IsConflict).ToArray();
+        if (selected.Length == 0)
+        {
+            Log("No new or selected conflicting rows to import; the base already has these rows.");
+            Status("No car changes to import.");
+            return;
+        }
+
+        bool sltOutput = GameDbSqliteBridge.IsSlt(basePath);
+        string stem = Path.GetFileNameWithoutExtension(basePath) + ".carmerge." + car.Id + "." +
+                      DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string outPath = UniqueOutputPath(Path.Combine(OutputDirFor(basePath), stem + (sltOutput ? ".slt" : ".sqlite")));
+        string sqliteOutput = sltOutput
+            ? Path.Combine(Path.GetTempPath(), "fh6_mod_studio_slt_carmerge_" + Guid.NewGuid().ToString("N") + ".sqlite")
+            : outPath;
+        using var tempOutput = sltOutput
+            ? new GameDbSqliteBridge.MaterializedDatabase(sqliteOutput, null, true) : null;
+        baseDb.VerifySourceUnchanged();
+        donorDb.VerifySourceUnchanged();
+        Status($"Importing {selected.Length:n0} rows for car {car.Id}...");
+        int written = await Task.Run(() => Merge.RunSelected(preview, selected, sqliteOutput,
+            msg => Dispatcher.Invoke(() => Log("    " + msg))));
+        if (sltOutput)
+        {
+            baseDb.VerifySourceUnchanged();
+            Status("Encrypting imported GameDB...");
+            await Task.Run(() => GameDbSqliteBridge.EncryptSnapshot(sqliteOutput, basePath, outPath));
+        }
+        _lastDecryptedSqlite = sltOutput ? null : outPath;
+        _pendingInput = outPath;
+        if (sltOutput) { _templateSlt = outPath; TemplateText.Text = outPath; }
+        StagedText.Text = $"Staged: {Path.GetFileName(outPath)}";
+        StagedText.Visibility = Visibility.Visible;
+        Log($"Imported {written:n0} row(s) for car {car.Id} into {Path.GetFileName(outPath)}.");
+        Done(outPath, "Car DB import complete.");
+    }
+
+    private string UniqueMergeOutput(string baseDb, string extension)
     {
         string dir = OutputDirFor(baseDb);
         string stem = Path.GetFileNameWithoutExtension(baseDb) + ".modmerge." + DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        string path = Path.Combine(dir, stem + ".sqlite");
-        for (int n = 2; File.Exists(path); n++) path = Path.Combine(dir, stem + $"-{n}.sqlite");
+        string path = Path.Combine(dir, stem + extension);
+        for (int n = 2; File.Exists(path); n++) path = Path.Combine(dir, stem + $"-{n}" + extension);
         return path;
     }
 

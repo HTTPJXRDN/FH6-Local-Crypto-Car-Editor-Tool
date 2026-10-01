@@ -22,12 +22,14 @@ public partial class MergeSelectionWindow : Window
     public IReadOnlyCollection<ModMergeRow> SelectedRows => _selected.ToArray();
     public IReadOnlyCollection<string> ReplacementTables => _replaceTables.Select(table => table.Name).ToArray();
 
-    public MergeSelectionWindow(ModMergePreview preview)
+    public MergeSelectionWindow(ModMergePreview preview, string? displayedBasePath = null, string? displayedDonorPath = null)
     {
         InitializeComponent();
         _preview = preview;
-        SourceText.Text = $"Mine: {Path.GetFileName(preview.BasePath)}    Donor: {Path.GetFileName(preview.OverlayPath)}";
-        SourceText.ToolTip = $"Mine: {preview.BasePath}\nDonor: {preview.OverlayPath}";
+        string basePath = displayedBasePath ?? preview.BasePath;
+        string donorPath = displayedDonorPath ?? preview.OverlayPath;
+        SourceText.Text = $"Mine: {Path.GetFileName(basePath)}    Donor: {Path.GetFileName(donorPath)}";
+        SourceText.ToolTip = $"Mine: {basePath}\nDonor: {donorPath}";
         WarningText.Text = preview.Warnings.Count == 0 ? "" :
             $"{preview.Warnings.Count} table(s) skipped: {string.Join("  |  ", preview.Warnings.Take(2))}";
         WarningText.ToolTip = string.Join("\n", preview.Warnings);

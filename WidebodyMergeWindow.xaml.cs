@@ -10,11 +10,13 @@ public partial class WidebodyMergeWindow : Window
     public long? SelectedCarId { get; private set; }
     public bool ReplaceConflicts => OverrideConflicts.IsChecked == true;
 
-    public WidebodyMergeWindow(WidebodyMergePreview preview)
+    public WidebodyMergeWindow(WidebodyMergePreview preview, string? displayedBasePath = null, string? displayedDonorPath = null)
     {
         InitializeComponent();
-        SourceText.Text = $"Base: {Path.GetFileName(preview.BasePath)}    Donor: {Path.GetFileName(preview.DonorPath)}";
-        SourceText.ToolTip = $"Base: {preview.BasePath}\nDonor: {preview.DonorPath}";
+        string basePath = displayedBasePath ?? preview.BasePath;
+        string donorPath = displayedDonorPath ?? preview.DonorPath;
+        SourceText.Text = $"Base: {Path.GetFileName(basePath)}    Donor: {Path.GetFileName(donorPath)}";
+        SourceText.ToolTip = $"Base: {basePath}\nDonor: {donorPath}";
         CarChoices.ItemsSource = preview.Cars;
         if (preview.Cars.Count == 1) CarChoices.SelectedIndex = 0;
     }

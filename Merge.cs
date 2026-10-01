@@ -49,7 +49,9 @@ public static partial class Merge
     public static void Run(string baseSqlite, string overlay, string outSqlite,
                            string[]? tables, Action<string>? log = null,
                            MergeMode mode = MergeMode.AddOnly,
-                           IEnumerable<string>? forceOverlayTables = null)
+                           IEnumerable<string>? forceOverlayTables = null,
+                           IEnumerable<string>? keepBaseTables = null,
+                           bool preserveKeylessNewRows = false)
     {
         File.Copy(baseSqlite, outSqlite, overwrite: true);
 
@@ -65,7 +67,9 @@ public static partial class Merge
             {
                 con.Open();
                 Exec(con, "PRAGMA foreign_keys=OFF;");   // we insert in dependency-agnostic order
-                Apply(con, overlay, tables, log, mode, force);
+                Apply(con, overlay, tables, log, mode, force,
+                    new HashSet<string>(keepBaseTables ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase),
+                    preserveKeylessNewRows);
             }
         }
         finally
@@ -77,7 +81,8 @@ public static partial class Merge
     }
 
     private static void Apply(SqliteConnection con, string overlay, string[]? tables,
-                              Action<string>? log, MergeMode mode, HashSet<string> force)
+                              Action<string>? log, MergeMode mode, HashSet<string> force,
+                              HashSet<string> keepBase, bool preserveKeylessNewRows)
     {
         if (overlay.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
         {
@@ -102,7 +107,8 @@ public static partial class Merge
         string ovEsc = Path.GetFullPath(overlay).Replace("'", "''");
         Exec(con, $"ATTACH DATABASE '{ovEsc}' AS ov;");
 
-        List<string> targets = tables is { Length: > 0 } ? tables.ToList() : SharedTables(con);
+        List<string> targets = (tables is { Length: > 0 } ? tables.ToList() : SharedTables(con))
+            .Where(t => !keepBase.Contains(t)).ToList();
 
         // Whole new tables introduced by the update (present only in the overlay). Unless
         // the caller restricted to an explicit table list, create each one in the base and
@@ -113,7 +119,7 @@ public static partial class Merge
         {
             var mainTabs = TableNames(con, "main");
             foreach (var ot in TableNames(con, "ov"))
-                if (!mainTabs.Contains(ot)) overlayOnly.Add(ot);
+                if (!mainTabs.Contains(ot) && !keepBase.Contains(ot)) overlayOnly.Add(ot);
         }
 
         int totalRows = 0, tableCount = 0;
@@ -194,6 +200,14 @@ public static partial class Merge
                                  $"EXCEPT SELECT {colList} FROM main.{Q(t)};";
                     rows = Exec(con, sql, tx);
                     log?.Invoke($"{t}: added {rows} new row(s) by content  [no PK, kept yours]");
+                }
+                else if (preserveKeylessNewRows)
+                {
+                    string sql = $"INSERT INTO main.{Q(t)} ({colList}) " +
+                                 $"SELECT {colList} FROM ov.{Q(t)} " +
+                                 $"EXCEPT SELECT {colList} FROM main.{Q(t)};";
+                    rows = Exec(con, sql, tx);
+                    log?.Invoke($"{t}: added {rows} rows by content [keyless; kept update-only rows]");
                 }
                 else if (!IsWithoutRowid(con, "main", t))
                 {

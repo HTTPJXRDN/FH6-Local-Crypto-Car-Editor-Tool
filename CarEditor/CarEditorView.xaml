@@ -575,7 +575,7 @@
         </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-          <Button Content="📂  Load DB" Style="{StaticResource GhostButton}" Click="LoadDb_Click" Margin="0,0,8,0"/>
+          <Button Content="📂  Load SLT / DB" Style="{StaticResource GhostButton}" Click="LoadDb_Click" Margin="0,0,8,0"/>
           <Button x:Name="ReloadBtn" Content="↺  Reload" Style="{StaticResource GhostButton}"
                   IsEnabled="False" Click="Reload_Click" Margin="0,0,14,0"/>
           <TextBlock Text="Output" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>

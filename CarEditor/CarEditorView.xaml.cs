@@ -124,6 +124,7 @@ public partial class CarEditorView : UserControl
     // ---- data ----
     SqliteConnection _conn;
     string _origPath, _workPath;
+    string _sourceSltHash;
     readonly HashSet<string> _motorMedia = new();   // fallback for cars absent from the embedded stock reference
     HashSet<long> _referenceCars = new();           // car Ids whose original powertrain is known from stock
     HashSet<long> _originalEvCars = new();          // stock cars that originally had an electric motor
@@ -649,7 +650,7 @@ public partial class CarEditorView : UserControl
         {
             string directory = Path.Combine(Path.GetTempPath(), "FH6LocalCryptoTool");
             Directory.CreateDirectory(directory);
-            _stockReferencePath = Path.Combine(directory, $"gamedbRC.stock.v1.2.3.{Environment.ProcessId}.sqlite");
+            _stockReferencePath = Path.Combine(directory, $"gamedbRC.stock.v1.2.4.{Environment.ProcessId}.sqlite");
 
             using Stream packed = Assembly.GetExecutingAssembly().GetManifestResourceStream(StockReferenceResource)
                 ?? throw new InvalidOperationException("the embedded stock database resource is missing");
@@ -950,7 +951,11 @@ public partial class CarEditorView : UserControl
     // ============================================================ DB open / export
     void LoadDb()
     {
-        var d = new OpenFileDialog { Filter = "SQLite DB (*.sqlite;*.slt;*.db)|*.sqlite;*.slt;*.db|All files|*.*" };
+        var d = new OpenFileDialog
+        {
+            Title = "Load an encrypted GameDB or decrypted SQLite database",
+            Filter = "GameDB / SQLite (*.slt;*.sqlite;*.db)|*.slt;*.sqlite;*.db|All files|*.*"
+        };
         if (d.ShowDialog() != true) return;
         LoadDatabase(d.FileName);
     }
@@ -959,24 +964,37 @@ public partial class CarEditorView : UserControl
     {
         string previousWorkPath = _workPath;
         string newWorkPath = NewWorkingPath();
+        bool switched = false;
         try
         {
+            // Validate and snapshot the new input before closing the current work.
+            // A wrong-key/corrupt SLT must not discard an unsaved editing session.
+            string sourceHash = CreateDatabaseSnapshot(sourcePath, newWorkPath);
             CloseCurrentDatabase();
+            switched = true;
             ResetLoadedDatabaseUi();
-            CreateDatabaseSnapshot(sourcePath, newWorkPath);
             _origPath = Path.GetFullPath(sourcePath);
+            _sourceSltHash = sourceHash;
             _workPath = newWorkPath;
             Open();
-            OutName.Text = Path.GetFileNameWithoutExtension(_origPath) + "_modified.sqlite";
+            bool slt = GameDbSqliteBridge.IsSlt(_origPath);
+            OutName.Text = Path.GetFileNameWithoutExtension(_origPath) + "_modified" + (slt ? ".slt" : ".sqlite");
+            ExportBtn.Content = slt ? "⬇  Export SLT" : "⬇  Export DB";
             Log($"loaded {_origPath}", "ok");
             DeleteWorkingFiles(previousWorkPath);
         }
         catch (Exception ex)
         {
-            CloseCurrentDatabase();
             DeleteWorkingFiles(newWorkPath);
+            if (!switched)
+            {
+                Log("load failed; previous working database was kept: " + ex.Message, "err");
+                return;
+            }
+            CloseCurrentDatabase();
             DeleteWorkingFiles(previousWorkPath);
             _origPath = null;
+            _sourceSltHash = null;
             _workPath = null;
             Status.Text = "no database loaded — Load a DB to begin";
             LoadedDbPath.Text = "";
@@ -987,14 +1005,15 @@ public partial class CarEditorView : UserControl
     static string NewWorkingPath() => Path.Combine(Path.GetTempPath(),
         $"fh6_mod_studio_car_editor_{Environment.ProcessId}_{Guid.NewGuid():N}.sqlite");
 
-    static void CreateDatabaseSnapshot(string sourcePath, string destinationPath)
+    static string CreateDatabaseSnapshot(string sourcePath, string destinationPath)
     {
         string sourceFullPath = Path.GetFullPath(sourcePath);
         if (!File.Exists(sourceFullPath)) throw new FileNotFoundException("database not found", sourceFullPath);
 
+        using var materialized = GameDbSqliteBridge.Materialize(sourceFullPath);
         using var source = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = sourceFullPath,
+            DataSource = materialized.SqlitePath,
             Mode = SqliteOpenMode.ReadOnly,
             Pooling = false,
         }.ToString());
@@ -1007,6 +1026,7 @@ public partial class CarEditorView : UserControl
         source.Open();
         destination.Open();
         source.BackupDatabase(destination);
+        return materialized.SourceHash;
     }
 
     void CloseCurrentDatabase()
@@ -1071,6 +1091,9 @@ public partial class CarEditorView : UserControl
         }
 
         ClearPowerBuilder();
+        ReloadBtn.IsEnabled = ExportBtn.IsEnabled = AddFeBtn.IsEnabled = RemoveFeBtn.IsEnabled =
+            AllPriceOneBtn.IsEnabled = RevertPricesBtn.IsEnabled =
+            BestHandlingBtn.IsEnabled = RevertHandlingBtn.IsEnabled = false;
         OptAutoshow.IsChecked = false;
         OptAutoshow.IsEnabled = false;
         OptRWD.IsChecked = OptFWD.IsChecked = OptManual.IsChecked = false;
@@ -1116,20 +1139,28 @@ public partial class CarEditorView : UserControl
         if (_origPath == null) return;
         string previousWorkPath = _workPath;
         string newWorkPath = NewWorkingPath();
+        bool switched = false;
         try
         {
+            string sourceHash = CreateDatabaseSnapshot(_origPath, newWorkPath);
             CloseCurrentDatabase();
+            switched = true;
             ResetLoadedDatabaseUi();
-            CreateDatabaseSnapshot(_origPath, newWorkPath);
             _workPath = newWorkPath;
+            _sourceSltHash = sourceHash;
             Open();
             DeleteWorkingFiles(previousWorkPath);
             Log("reverted to original", "warn");
         }
         catch (Exception ex)
         {
-            CloseCurrentDatabase();
             DeleteWorkingFiles(newWorkPath);
+            if (!switched)
+            {
+                Log("reload failed; current edits were kept: " + ex.Message, "err");
+                return;
+            }
+            CloseCurrentDatabase();
             DeleteWorkingFiles(previousWorkPath);
             _workPath = null;
             Status.Text = "database reload failed";
@@ -1142,17 +1173,35 @@ public partial class CarEditorView : UserControl
         if (_conn == null) return;
         try
         {
-            var d = new SaveFileDialog { FileName = OutName.Text, Filter = "SQLite DB (*.sqlite)|*.sqlite|All files|*.*" };
+            bool sourceSlt = GameDbSqliteBridge.IsSlt(_origPath);
+            var d = new SaveFileDialog
+            {
+                FileName = OutName.Text,
+                Filter = "Encrypted GameDB (*.slt)|*.slt|SQLite DB (*.sqlite)|*.sqlite|All files|*.*",
+                FilterIndex = sourceSlt ? 1 : 2,
+                AddExtension = true
+            };
             if (d.ShowDialog() != true) return;
             string destinationPath = Path.GetFullPath(d.FileName);
-            ExportDatabase(destinationPath);
+            string template = null;
+            if (GameDbSqliteBridge.IsSlt(destinationPath) && !sourceSlt)
+            {
+                var templatePicker = new OpenFileDialog
+                {
+                    Title = "Select the original encrypted GameDB .slt as the template",
+                    Filter = "Encrypted GameDB (*.slt)|*.slt"
+                };
+                if (templatePicker.ShowDialog() != true) return;
+                template = templatePicker.FileName;
+            }
+            ExportDatabase(destinationPath, template);
             Log("⬇ exported " + Path.GetFileName(d.FileName), "ok");
         }
         catch (InvalidOperationException ex) { Log("export cancelled: " + ex.Message, "warn"); }
         catch (Exception ex) { Log("export failed: " + ex.Message, "err"); }
     }
 
-    internal void ExportDatabase(string destinationPath)
+    internal void ExportDatabase(string destinationPath, string templateSlt = null)
     {
         if (_conn == null || string.IsNullOrWhiteSpace(_origPath))
             throw new InvalidOperationException("load a database before exporting");
@@ -1160,6 +1209,15 @@ public partial class CarEditorView : UserControl
         destinationPath = Path.GetFullPath(destinationPath);
         if (string.Equals(destinationPath, Path.GetFullPath(_origPath), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("choose a new file name so the loaded database stays untouched");
+        if (GameDbSqliteBridge.IsSlt(destinationPath))
+        {
+            templateSlt ??= GameDbSqliteBridge.IsSlt(_origPath) ? _origPath : null;
+            if (templateSlt == null)
+                throw new InvalidOperationException("exporting an .slt from SQLite requires the original encrypted .slt template");
+            if (_sourceSltHash != null &&
+                string.Equals(Path.GetFullPath(templateSlt), Path.GetFullPath(_origPath), StringComparison.OrdinalIgnoreCase))
+                GameDbSqliteBridge.VerifySourceHash(_origPath, _sourceSltHash);
+        }
 
         string tempExport = destinationPath + ".fh6modstudio-" + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -1173,7 +1231,10 @@ public partial class CarEditorView : UserControl
             destination.Open();
             _conn.BackupDatabase(destination);
             destination.Close();
-            File.Move(tempExport, destinationPath, true);
+            if (GameDbSqliteBridge.IsSlt(destinationPath))
+                GameDbSqliteBridge.EncryptSnapshot(tempExport, templateSlt, destinationPath);
+            else
+                File.Move(tempExport, destinationPath, true);
         }
         finally
         {
