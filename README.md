@@ -1,6 +1,6 @@
 # Forza Mod Tool
 
-Forza Mod Tool brings the FH6 crypto, car, animation, save-swap, and ProfileData tools together in one application.
+Forza Mod Tool brings the FM/FH6 crypto, car, animation, save-swap, and ProfileData tools together in one application.
 
 Download and extract `FH6LocalModTool_v1.2.5.zip` from the release assets
 
