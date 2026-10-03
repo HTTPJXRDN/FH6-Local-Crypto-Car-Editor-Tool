@@ -1,0 +1,9 @@
+SQLite is in the public domain. SQLitePCLRaw and Microsoft.Data.Sqlite have separate accompanying licenses.
+
+SQLite copyright statement: https://www.sqlite.org/copyright.html
+All SQLite code and documentation have been dedicated to the public domain by their authors. No license is required to use core SQLite source code.
+
+SQLite source-header blessing:
+May you do good and not evil.
+May you find forgiveness for yourself and forgive others.
+May you share freely, never taking more than you give.

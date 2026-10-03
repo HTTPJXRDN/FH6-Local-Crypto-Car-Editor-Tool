@@ -949,6 +949,23 @@
                   </StackPanel>
                 </Grid>
                 <!-- Reset -->
+                <StackPanel x:Name="FmTrackPanel" Visibility="Collapsed" Margin="0,12,0,0">
+                  <CheckBox x:Name="OptFmTrack" Content="FM direct track offsets (metres)" IsChecked="False"/>
+                  <TextBlock Foreground="{StaticResource Dim}" TextWrapping="Wrap" FontSize="10.5" Margin="0,5,0,5"
+                             Text="Native CarTrackOffsets fields, per car. Base and upgraded offsets are separate; no FH6 upgrade-menu levels. Check this option and Apply. In-game effect still needs verification."/>
+                  <WrapPanel>
+                    <TextBlock Text="Base front" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <TextBox x:Name="FmTrackFront" Style="{StaticResource NumBox}" Width="75" Margin="0,0,12,0"/>
+                    <TextBlock Text="rear" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <TextBox x:Name="FmTrackRear" Style="{StaticResource NumBox}" Width="75"/>
+                  </WrapPanel>
+                  <WrapPanel Margin="0,5,0,0">
+                    <TextBlock Text="Upgrade front" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <TextBox x:Name="FmTrackUpgradeFront" Style="{StaticResource NumBox}" Width="75" Margin="0,0,12,0"/>
+                    <TextBlock Text="rear" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <TextBox x:Name="FmTrackUpgradeRear" Style="{StaticResource NumBox}" Width="75"/>
+                  </WrapPanel>
+                </StackPanel>
                 <Button x:Name="BtnResetFitment" Content="↺  Reset fitment to stock (selected body)" Style="{StaticResource GhostButton}"
                         HorizontalAlignment="Left" Margin="0,12,0,0" Click="ResetFitment_Click"
                         ToolTip="Removes all non-stock tire-width, tire-profile and track-width options from the ticked body/bodies."/>

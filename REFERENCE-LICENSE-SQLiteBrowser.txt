@@ -1,0 +1,9 @@
+DB Browser for SQLite is bi-licensed under the Mozilla Public License
+Version 2, as well as the GNU General Public License Version 3 or later.
+
+Modification or redistribution is permitted under the conditions of these licenses.
+
+Check `LICENSE-GPL-3.0` for the full text of the GNU General Public License Version 3.
+Check `LICENSE-MPL-2.0` for the full text of the Mozilla Public License Version 2.
+Check `LICENSE-MIT` for the full text of the MIT License. and that is the license for the `nalgeon/sqlean` library.
+Check `LICENSE-PLUGINS` for other rights regarding included third-party resources.

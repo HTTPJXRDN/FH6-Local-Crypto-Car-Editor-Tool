@@ -10,7 +10,7 @@
     <Product>FH6 Local Mod Tool</Product>
     <Title>FH6 Local Mod Tool</Title>
     <Description>Edit FH6 databases, cars, animations, and profile saves in one app.</Description>
-    <Version>1.2.4</Version>
+    <Version>1.2.5</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\ICO\dbtool_icon.ico</ApplicationIcon>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
@@ -18,28 +18,89 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
+    <Product>Forza Mod Tool</Product>
+    <Title>Forza Mod Tool</Title>
+    <Description>Forza Horizon 6 and Motorsport database, car, animation and asset tools.</Description>
+    <DefineConstants>$(DefineConstants);PUBLIC_CRYPTO_RUNTIME</DefineConstants>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+    <Compile Remove="CryptoRuntime\**\*.cs" />
   </ItemGroup>
-
   <ItemGroup>
+    <Content Include="Assets\Native\XCOMPRESS-PROVENANCE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="XCOMPRESS-PROVENANCE.md" ExcludeFromSingleFile="true" />
     <Content Include="AnimationSwap\AclTools\forzatech_acl.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="forzatech_acl.dll" />
     <Content Include="AnimationSwap\AclTools\acl_compressor.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="acl_compressor.exe" />
-    <Content Include="AnimationSwap\AclTools\LICENSE-ACL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="LICENSE-ACL.txt" />
-    <Content Include="AnimationSwap\AclTools\LICENSE-RTM.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="LICENSE-RTM.txt" />
-    <Content Include="AnimationSwap\AclTools\LICENSE-SJSON.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="LICENSE-SJSON.txt" />
+    <Content Include="AnimationSwap\AclTools\LICENSE-ACL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="licenses\LICENSE-ACL.txt" />
+    <Content Include="AnimationSwap\AclTools\LICENSE-RTM.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="licenses\LICENSE-RTM.txt" />
+    <Content Include="AnimationSwap\AclTools\LICENSE-SJSON.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="licenses\LICENSE-SJSON.txt" />
   </ItemGroup>
-
   <ItemGroup>
     <Resource Include="Assets\ICO\dbtool_icon.ico" />
     <Resource Include="Assets\Logo\FMLogo_trim.png" />
     <Resource Include="Assets\Logo\dbtool_icon.png" />
     <Resource Include="Assets\Logo\db_plain.png" />
-    <EmbeddedResource Include="Assets\Reference\gamedbRC.stock.sqlite.gz"
-                      LogicalName="FH6LocalCryptoTool.gamedbRC.stock.sqlite.gz" />
+    <EmbeddedResource Include="Assets\Reference\gamedbRC.stock.sqlite.gz" LogicalName="FH6LocalCryptoTool.gamedbRC.stock.sqlite.gz" />
+    <!-- Retain the current reference; add future verified clean versions alongside it. -->
+    <EmbeddedResource Include="Assets\Reference\gamedbRC.stock.*.sqlite.gz" LogicalName="FH6LocalCryptoTool.%(Filename)%(Extension)" />
     <EmbeddedResource Include="AnimationSwap\donor_library.json" />
     <EmbeddedResource Include="AnimationSwap\stock_baseline.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Fh6Keys.cs;MotorsportCmsContainer.cs" />
+    <Reference Include="FH6LocalCrypto.Runtime">
+      <HintPath>lib\FH6LocalCrypto.Runtime.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Content Include="LICENSE-DOTNET.txt" TargetPath="licenses\LICENSE-DOTNET.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="LICENSE-Microsoft.Data.Sqlite.txt" TargetPath="licenses\LICENSE-Microsoft.Data.Sqlite.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="LICENSE-Obfuscar.txt" TargetPath="licenses\LICENSE-Obfuscar.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="LICENSE-SQLitePCLRaw.txt" TargetPath="licenses\LICENSE-SQLitePCLRaw.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="LICENSE-WPF.txt" TargetPath="licenses\LICENSE-WPF.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="NATIVE_RUNTIME.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="SQLITE-PUBLIC-DOMAIN.txt" TargetPath="licenses\SQLITE-PUBLIC-DOMAIN.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="THIRD_PARTY_NOTICES.md" TargetPath="licenses\THIRD_PARTY_NOTICES.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="THIRD-PARTY-NOTICES-DOTNET.txt" TargetPath="licenses\THIRD-PARTY-NOTICES-DOTNET.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+    <Content Include="THIRD-PARTY-NOTICES-WPF.txt" TargetPath="licenses\THIRD-PARTY-NOTICES-WPF.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
   </ItemGroup>
 </Project>

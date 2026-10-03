@@ -1,8 +1,8 @@
-# FH6 Local Mod Tool v1.2.4
+# Forza Mod Tool
 
-FH6 Local Mod Tool brings the FH6 crypto, car, animation, save-swap, and ProfileData tools together in one themed Windows desktop application.
+Forza Mod Tool brings the FH6 crypto, car, animation, save-swap, and ProfileData tools together in one application.
 
-Download and extract `FH6LocalModTool_v1.2.4.zip` from the release assets, or build the source with the .NET 8 SDK. The package includes the self-contained Windows x64 executable and its animation helpers.
+Download and extract `FH6LocalModTool_v1.2.5.zip` from the release assets
 
 ## Table of contents
 
@@ -21,6 +21,8 @@ Download and extract `FH6LocalModTool_v1.2.4.zip` from the release assets, or bu
 - [Section 3: Animation Swap](#section-3-animation-swap)
 - [Section 4: Save Swap](#section-4-save-swap)
 - [Section 5: Profile Editor](#section-5-profile-editor)
+- [Section 6: DB Browser](#section-6-db-browser)
+- [Section 7: Forza Motorsport (2023)](#section-7-forza-motorsport-2023)
 - [Troubleshooting](#troubleshooting)
 - [Advanced technical reference](#advanced-technical-reference)
 - [Video guide](#video-guide)
@@ -37,7 +39,7 @@ Download and extract `FH6LocalModTool_v1.2.4.zip` from the release assets, or bu
 - Selectively merge `.slt` or SQLite databases, including mixed-format inputs.
 - Select exactly which donor database tables and rows are merged into the staged database.
 - Export the selected car's related database rows and import that donor through **Import car DB**, with an optional conflict override.
-- Carry an old modded database onto a clean updated database through **Merge updated DB**, without depending on the embedded stock reference.
+- Carry additions, edits and deliberate deletions onto a clean updated database through **Merge updated DB**, using a version-matched clean baseline.
 - Edit car availability, prices, engines, motors, fitment, wheelbase, drivetrains, tires, suspension, handling, and per-engine power settings.
 - Batch-edit multiple cars with append-only, duplicate-safe upgrade creation.
 - Compare a loaded database against an embedded stock reference, filter modified cars, and restore individual cars.
@@ -60,13 +62,13 @@ The release executable supports Windows 10/11 x64 and does not require a separat
 4. Work on copied files until you have confirmed the result in game.
 5. Read the activity log after every operation. A completed file write does not necessarily mean the game accepted the edited contents.
 
-> **Live SQLite Editor compatibility:** not tested how previously using a Live SQLite Editor may affect a database used with this tool. It is also unknown whether a `.sqlite` file created by a Live SQLite Editor can be safely merged into `gamedbRC.sqlite`. Keep untouched backups and do not assume the two editing workflows are compatible. If you test it and it works let me know.
+> **Live SQLite Editor compatibility:** This has been tested by a few people now and it does work perfectly. Using as clean gamedbRC.slt at the top and dropping your SQLite editors `.sqlite` in the merge area.
 
 ## Start here: a beginner's guide
 
-Download and extract `FH6LocalModTool_v1.2.4.zip` from the release assets, then run `FH6ModStudio.exe`. The ZIP keeps the animation helper files beside the executable. If downloading individual files instead, keep `acl_compressor.exe` and `forzatech_acl.dll` in the same folder as `FH6ModStudio.exe`. If building from source, run the resulting `FH6ModStudio.exe` instead.
+Download and extract `FH6LocalModTool_v1.2.5.zip` from the release assets, then run `FH6ModStudio.exe`. The ZIP keeps the animation helper files beside the executable. If downloading individual files instead, keep `acl_compressor.exe` and `forzatech_acl.dll` in the same folder as `FH6ModStudio.exe`. If building from source, run the resulting `FH6ModStudio.exe` instead.
 
-The tool has five tabs:
+The tool has six tabs:
 
 | Tab | Use it when you want to... |
 |---|---|
@@ -75,6 +77,7 @@ The tool has five tabs:
 | **Animation Swap** | Swap door and experimental CLIPD animation channels or patch animations for database-controlled stance. |
 | **Save Swap** | Move the progress payload from one `C_ProfileData` save into another save's container. |
 | **Profile Editor** | View and edit supported ProfileData values using friendly controls or advanced data views. |
+| **DB Browser** | Browse schema/data, edit cells and records, run SQL, and export a separate database working copy. |
 
 ![Crypto tab overview](Screenshots/local-crypto-overview.png)
 
@@ -278,12 +281,12 @@ This conversion keeps the existing bone count and file layout. It does not add o
 ### Extract an encrypted ZIP
 
 1. Drag the `.zip` onto the main drop area.
-2. Confirm that the General method was selected automatically.
+2. Format/key detection is automatic; there is no manual Key dropdown.
 3. Click **Decrypt**.
 4. Extracted files are written into `<zip-name>.extracted`.
 5. Review the log for the authenticated entry count and total extracted size.
 
-The current interface decrypts and extracts supported ZIP entries. It does not rebuild a modified outer ZIP archive.
+Supported FH6 ZIP workspaces can also be rebuilt: edit the extracted files, drop the whole folder or round-trip manifest into Crypto, and click **Re-encrypt**. Keep the original template/metadata unchanged; old FH6 extraction-only folders must be extracted again. Do not add/remove entries. For Motorsport ZIPs and their LZX dependency, see [Section 7](#cameracar-zip-rebuilding-and-the-lzx-dll).
 
 ### Share or import a car DB
 
@@ -304,16 +307,16 @@ The result follows the receiving DB's format: `.slt` in produces an encrypted `.
 4. Click **Merge updated DB**, review the source names and preview, and confirm.
 5. Test the new output before using it as your active GameDB. Both original files remain available.
 
-The old modded DB wins for matching row IDs, while rows and tables found only in the clean update remain. The updated version stamp is retained. This action accepts SLT or SQLite in either area and produces the top file's format. It uses the two selected files, so replacing the app's embedded stock reference after an update does not affect it.
+The app matches your old modded DB's `VersionInfo.database_version` to an embedded clean reference from that same game version. It compares the old clean reference with your modded DB, then applies only your additions, edited fields and deliberate deletions onto the new clean DB. Untouched official updates, new cars and the updated version stamp are retained. This action accepts SLT or SQLite in either area and produces the top file's format.
 
-This merge also copies unchanged old stock values over matching updated values. Official changes to existing cars or parts may therefore be overwritten; it does not identify only your modifications. Deleted donor rows cannot be inferred, and tables without primary keys may keep both versions of a changed row. See the [advanced update-merge reference](#merge-an-updated-game-database-with-your-old-modded-database) before merging an update that changes existing data.
+Older clean references are kept alongside newer references, not replaced. If no unique embedded reference matches, the app asks you to choose the **unmodified full GameDB from the same version as the old modded DB**. A version stamp identifies a build but does not prove a user-supplied reference is clean. Your edits win same-field conflicts; deliberate deletions of old keys win over official edits to those keys. Keyless tables use exact-content differences and duplicate counts, so independently changed official and modded variants can coexist. See the [advanced update-merge reference](#merge-an-updated-game-database-with-your-old-modded-database) and test before installing the output.
 
 ### Crypto controls
 
 - **DB template** selects the original SLT used to frame a rebuilt GameDB.
 - **Output folder** overrides saving beside the input.
 - **Clear** returns output to the input file's folder.
-- **Key** allows manual method selection for advanced cases; normal GameDB, asset, and ZIP workflows select it automatically.
+- File staging automatically detects the supported format/key usage; no manual Key selector is needed.
 - **Open folder when done** opens the completed output's location.
 - **Clear log** clears only the on-screen activity history.
 
@@ -352,7 +355,7 @@ If you modified several cars, remain in a completely unrelated car until fresh c
 
 Changes remain in the temporary working database until **Export SLT** or **Export DB** is used.
 
-The editor carries a compressed stock GameDB reference inside the application. This enables the **Modified cars only** comparison and **Restore selected car from embedded stock DB** without asking the user to locate a separate stock database. Restoration is disabled in batch mode and for cars that do not exist in the embedded reference.
+The editor carries compressed, versioned stock GameDB references inside the application. It selects the reference matching the loaded database's `VersionInfo.database_version` on every load. This enables **Modified cars only** and **Restore selected car from embedded stock DB** without comparing against the wrong game build. Comparison and restoration are disabled for unknown or ambiguous versions; restoration is also disabled in batch mode and for cars absent from the matched reference.
 
 The selected-car summary shows its powertrain, available engine options, fitment basics, Autoshow state, and stock-restore control:
 
@@ -675,6 +678,83 @@ Advanced edits can make a profile invalid even when the encrypted container rebu
 4. Export to a new encrypted file and read the verification result.
 5. Keep the original backup, then install and rename the exported copy only when ready to test.
 
+## Section 6: DB Browser
+
+This is a native WPF database workspace inspired by DB Browser for SQLite 3.13.1, using the tool's dark/pink theme. It is an independent implementation, not an embedded copy of the Qt application.
+
+### Main workflow
+
+- Open an FH6 SLT or SQLite database, or start a new empty database. Every session uses an independent private working copy. New Motorsport additions elsewhere in the tool are not changed; unsupported Motorsport SLTs retain the existing bridge restriction.
+- Database Structure lists tables, views, indexes and triggers, their columns and creation SQL. Create tables/indexes through dialogs; modify table names/columns or edit view/index/trigger definitions through SQL. Delete objects with confirmation.
+- Browse Data has a table selector, sortable headers, per-column filters, global text search and page navigation. Column filters accept literal text, `=exact`, numerical `>`, `<`, `>=`, `<=`, and `NULL` / `NOT NULL`.
+- Edit cells directly in the grid with a double-click, F2 or typing. Enter, Tab or clicking away saves the value to the private working copy; Esc cancels the current edit. Existing storage types are preserved; a NULL cell uses the declared column type when filled. Numeric edits accept dot or comma. Invalid values/constraint failures keep the editor open and leave database values intact. Refresh reapplies filters/sorting after edits.
+- The right-hand editor remains available for long text, explicit type changes, NULL, and hexadecimal BLOB values. Use Apply cell for changes made in that panel only. New records use defaults for omitted fields. Views/generated columns and tables without a safe row identity are read-only in the grid.
+- Execute SQL supports queries, modification scripts, selected-text execution, F5, Ctrl+Enter, opening/saving SQL files, and an SQL log. SQL numeric literals use dots. Commands are atomic and failed/cancelled scripts roll back together. Results display up to 1,000 rows; SQL execution has a 15-second limit.
+- Export CSV writes **all records** of the selected table, not only the filtered page; generated columns are omitted. Text is quoted, SQL NULL is an unquoted empty field, and blobs are hex. Import CSV appends records to an existing table with matching headers; constraints or invalid input roll back the whole import. Imports accept comma-delimited RFC-style quoted fields and are limited to 64 MB / 100,000 records. CSV is not a full-fidelity backup of arbitrary SQLite storage classes; use SQLite or SQL dumps for that.
+- Import/export SQL dumps covers schema and records, including indexes, triggers and AUTOINCREMENT counters. Common external transaction wrappers are removed because the runner supplies its own atomic operation. Imports are limited to 64 MB and the SQL execution limit. Virtual-table dumps are not supported.
+- Edit Pragmas shows database properties. Only user_version and application_id are editable; storage and safety settings remain read-only.
+- Write changes creates a new undo checkpoint in the working copy, not the input. Revert changes restores the previous checkpoint. Export as creates a new validated SQLite or SLT file; SQLite-to-SLT export requires an original encrypted template. Existing files are never overwritten.
+
+### Safeguards and differences
+
+Foreign-key enforcement remains off for the GameDB modding workflow; row deletion does not automatically delete related records. Use `PRAGMA foreign_key_check;` for diagnostics. The SQL authorizer blocks ATTACH/DETACH, extension/file access, explicit transaction commands, temporary/virtual-table creation, and unsafe PRAGMAs. SQLite integrity is checked during export, but in-game compatibility still requires testing.
+
+This implements the main local editing/import/export workflow, not every feature of the upstream application: SQLCipher encryption, remote databases, plotting, syntax highlighting/autocompletion and multiple SQL-editor tabs are not included.
+
+Changes in this tab are not shared automatically with Car Editor or Crypto. Export the edited database and reload that output in another tab when needed.
+
+## Section 7: Forza Motorsport (2023)
+
+Motorsport support uses the existing **Crypto**, **Car Editor**, and **DB Browser** tabs. The FH6 GameDB folder, direct-SLT, merge, and profile instructions above are not Motorsport installation instructions.
+
+**For supported FM files, modifying works basically the same as FH6: decrypt/extract, edit, then export/re-encrypt/rebuild. The main installation difference is that FM has no override folder.** Close the game, back up the original, and put the finished modified file at its original location under `Forza Motorsport\Content\media\`, replacing the original with the same filename. Keep the original subfolder structure—do not put every file directly in the `media` root.
+
+For example, a rebuilt camera ZIP replaces the original `Content\media\base\camera.zip`; a modified car ZIP replaces its original car ZIP at that car's existing path. Rename the original to `.bak` or keep a separate untouched backup before replacing it, and never overwrite an existing backup. Install only the finished encrypted database/asset or rebuilt ZIP, not the temporary decrypted/editing files. The GameDB-specific steps below show the same backup-and-replace process.
+
+### Supported workflows
+
+- **GameDB:** authenticated decrypt/re-encrypt for the supported Motorsport TransformIT format.
+- **General text assets:** decrypt/edit/re-encrypt supported files such as `GameTunableSettings.ini`, `physicssettings.ini`, and `ClientFeatureFlagConfiguration.json`.
+- **CMS:** decrypt/re-encrypt supported entries and the separately authenticated cache manifest; inspect/extract CMS archives, including extensionless cached ZIPs. This does not automatically install or update a CMS cache.
+- **Car Editor:** edit decrypted Motorsport SQLite using shared-schema options, including engines, power, suspension, rims/tire widths, and BaseCost. Missing FH6-only options are disabled.
+- **Track offsets:** separate native per-car controls with input validation and reset to loaded values. Their in-game effect still needs testing.
+- **ZIPs:** extract/rebuild supported camera/car LZX ZIPs, or extract large/deduplicated track ZIPs without rebuilding them.
+
+### GameDB editing
+Drop supported gamedb.slt into Crypto, Decrypt, edit the resulting FM SQLite in Car Editor or DB Browser, export SQLite, then Re-encrypt in Crypto with the original FM SLT template. The direct SLT Car Editor/DB Browser/merge path remains FH6-specific. FM shared-schema edits are enabled; missing FH6-only options are disabled. Save/profile workflows are FH6-specific.
+
+### Install a modified Motorsport GameDB
+
+Motorsport has **no override folder** for this workflow.
+
+1. Close the game and open `Forza Motorsport\Content\media\base\db\`.
+2. Rename the original `gamedb.slt` to `gamedb.slt.bak`. If a backup already exists, preserve it and back up the current file under another name; never overwrite the backup.
+3. Copy the new **re-encrypted** modified file into this same folder and name it exactly `gamedb.slt`. Do not install a decrypted SQLite file.
+4. Keep the original backup untouched so it can be restored. A separate backup outside the game folder is recommended.
+
+### Camera/car ZIP rebuilding and the LZX DLL
+
+FM method-21 LZX operations require a legally obtained **x64 `xcompress64.dll`** beside `FH6ModStudio.exe`. The DLL is not currently included. See [download/setup instructions](NATIVE_RUNTIME.md); other functions do not require it.
+
+1. Drop a supported Motorsport camera/car ZIP onto **Crypto** and click **Decrypt**.
+2. Edit files in the new extracted folder, keeping `forza-zip-roundtrip.json` and `.__original.zip` unchanged.
+3. Drop the **whole extracted folder** (or its manifest) back into Crypto and click **Re-encrypt**.
+4. Review the verified new `.modded.zip`; the original remains untouched. Do not add/remove entries.
+
+Modified Motorsport camera/car ZIPs have been confirmed working in game.
+
+### Track ZIP extraction
+
+Track ZIPs use **extract-only** mode. The tool automatically looks for the matching `pcfamily\Dedupe.zip` (or a copy beside the input), resolves shared references, and checks decoded sizes/CRCs. Keep the matching shared archive available.
+
+The output contains `forza-extract-only.json`, not a round-trip ZIP template. Track outputs and CMS archive extractions cannot be rebuilt through the camera/car ZIP workflow.
+
+### Pricing limitations
+
+CMS showroom-price edits change the purchase preview, but attempting to buy returns a server error. BaseCost edits did not change tested shop prices. This is not a working discounted-purchase mod or an automatic CMS installer. Boost edits and added rims displaying 0 CP have been confirmed in game.
+
+Back up originals and test modified outputs in game. Successful cryptographic or SQLite validation does not guarantee the game accepts an edit.
+
 ## Troubleshooting
 
 ### A change does not appear in game
@@ -750,19 +830,14 @@ The staged database remains the base, and neither source file is overwritten. Wh
 
 ### Merge an updated game database with your old modded database
 
-This is a **separate** Crypto action; the general **Merge** picker and **Import car DB** remain available. Put the clean GameDB from the new game update (`.slt` or `.sqlite`) in the **top** Crypto drop area. Put your **old modded** GameDB in the smaller **lower merge** area, then click **Merge updated DB**. Review the preview and confirm. The result is a new file in the top input's format; neither source is overwritten. The embedded stock DB is not used, so replacing it after a game update does not change this merge's reference.
+This is a **separate** Crypto action; the general **Merge** picker and **Import car DB** keep their existing row-selection behavior and do not infer deletions. Put the clean GameDB from the new game update (`.slt` or `.sqlite`) in the **top** Crypto drop area. Put your **old modded full GameDB** in the smaller **lower merge** area, then click **Merge updated DB**. Review the matched baseline stamp and addition/edit/deletion counts, then confirm. The result is a new file in the top input's format; all sources and the clean reference stay untouched.
 
-Matching rows from your old modded DB win, while rows and tables found only in the new update stay. The new update's `VersionInfo` is kept. Car-part positions are overlaid by car/body to retain positions for new cars. Tables without primary keys are merged by complete row content, so an updated and an older variant may both remain. This is a **two-file overlay**, not a three-way comparison: it cannot tell your edits apart from unchanged old stock values. It may overwrite balance, fixes, or other values the update changed in existing rows. Use an untouched backup, inspect important changes, and test the new output in-game before replacing an active GameDB. Deleted rows from your old modded DB cannot be inferred or carried forward.
+This is a **three-way comparison**: old clean baseline, old modded DB, new clean update. A baseline key missing from the modded DB is a deliberate deletion and is removed from the output, including engine/motor upgrade rows deleted for ICE/EV conversions. Rows added only by the official update are not mistaken for deletions. For keyed existing rows, only fields differing from the old baseline are copied, preserving official edits to untouched fields. User changes win when both sides edit the same field. A user-edited key removed by the official update is restored from the donor; review such conflicts before using the result. New user-added keys win collisions with update-added keys. The new update's `VersionInfo` stays unchanged.
 
-### Build from source
+Tables without keys, including car-part positions, use exact row content and multiplicity rather than trusting row IDs. Their old deleted content is removed and newly added content is copied. If the update independently changed the same keyless row, its new variant may remain alongside the modded variant; review the listed tables. Missing donor tables, incompatible column/key schemas and known sparse car exports block the update merge instead of risking mass deletion. New donor-only tables are supported; dropping an entire baseline table is not applied automatically. Structural/FK checks are safeguards, not a guarantee of in-game compatibility.
 
-From the repository folder, run:
+The app never orders the version stamp numerically or silently substitutes its newest reference. Keep older verified clean baselines when embedding a new one; see [reference maintenance](Assets/Reference/README.md). The current source includes one verified clean version, and automatically supports additional versioned references as updates become available.
 
-```powershell
-dotnet build FH6ModTool.csproj -c Release
-```
-
-The .NET 8 SDK restores the SQLite dependency during the build. The animation helper binaries and their licenses are included under `AnimationSwap/AclTools` and are copied to the build output. Keep `acl_compressor.exe` and `forzatech_acl.dll` beside the executable when distributing a published build.
 
 ## Video guide
 
@@ -776,7 +851,13 @@ FH6 Local Mod Tool is an unofficial project and is not affiliated with or endors
 
 - JXRDN — Project creator, feature direction, UI design, research, and extensive in-game testing.
 - Draff — Original Botan-based cryptography work, technical research, reference material, save-swap guidance, and now the newly added save editor.
-- The Botan Project — Cryptographic library and runtime used by the application.
+- The Botan Project — Legacy crypto research/reference credit; this release uses managed .NET cryptography, not a bundled Botan binary.
 - Smidge — Provided the reference database and schema examples that helped make additional upgrade options possible.
 - Stalin — Identified and helped correct text-asset round-trip requirements
 - Codex — Development assistance, debugging, automated round-trip testing, UI refinement, and documentation.
+- DB Browser for SQLite (https://github.com/sqlitebrowser/sqlitebrowser) UI/workflow reference
+- ForzaTechStudio (https://github.com/D3FEKT/ForzaTechStudio)
+
+### Licenses and notices
+
+See THIRD_PARTY_NOTICES.md and accompanying licenses. Reference-only SQLiteBrowser and ForzaTechStudio license texts are in the source upload, not the executable ZIP. Required notices for redistributed components accompany the EXE. xcompress64.dll is not currently redistributed.

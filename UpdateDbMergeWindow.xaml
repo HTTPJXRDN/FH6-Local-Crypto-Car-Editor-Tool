@@ -1,7 +1,7 @@
 <Window x:Class="FH6LocalCryptoTool.UpdateDbMergeWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Merge updated DB" Width="710" Height="430" MinWidth="590" MinHeight="360"
+        Title="Merge updated DB" Width="710" Height="490" MinWidth="590" MinHeight="440"
         WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="CanResize"
         Background="#FF1D1D1F" Foreground="#FFF4F4F6">
     <Window.Resources>
@@ -30,9 +30,9 @@
             <StackPanel Grid.Row="1" Margin="16,15,16,12">
                 <TextBlock x:Name="SourcesText" Foreground="{StaticResource Dim}" TextWrapping="Wrap"/>
                 <TextBlock x:Name="SummaryText" Foreground="{StaticResource Pink}" FontWeight="SemiBold" Margin="0,12,0,0"/>
-                <TextBlock Text="The result starts from the clean updated DB. Matching rows from your modded DB overwrite it, while rows found only in the update are kept. This does not use the embedded stock DB."
+                <TextBlock Text="The result starts from the clean updated DB. Your old modded DB is compared with its version-matched clean baseline. Only your additions, edited fields and deliberate deletions are applied. New update content and the new VersionInfo are kept."
                            TextWrapping="Wrap" Margin="0,9,0,0"/>
-                <TextBlock Text="Important: unchanged old-stock rows in your modded DB can overwrite updated values on existing cars. Use this for add-cars-only updates; review and test the output before installing it. The new DB's VersionInfo is kept."
+                <TextBlock Text="Important: your edits win when both you and the update changed the same field. Deliberately deleted old keys are removed even if the update changed them. Review and test the output before installing it; a matching version stamp does not prove an external baseline is unmodified."
                            Foreground="{StaticResource Pink}" TextWrapping="Wrap" Margin="0,8,0,0"/>
             </StackPanel>
             <TextBox Grid.Row="2" x:Name="DetailsText" Margin="16,0,16,0" Padding="10" IsReadOnly="True"

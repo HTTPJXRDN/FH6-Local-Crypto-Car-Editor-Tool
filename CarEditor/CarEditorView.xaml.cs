@@ -125,6 +125,19 @@ public partial class CarEditorView : UserControl
     SqliteConnection _conn;
     string _origPath, _workPath;
     string _sourceSltHash;
+    readonly Dictionary<string, HashSet<string>> _schema = new(StringComparer.OrdinalIgnoreCase);
+    bool HasAutoshow => HasColumn("Data_Car", "NotAvailableInAutoshow");
+    bool HasProfileOffsets => HasColumn("List_UpgradeCarBodyTireAspectRatioFront", "FrontTireAspectRatioOffset") &&
+        HasColumn("List_UpgradeCarBodyTireAspectRatioRear", "RearTireAspectRatioOffset");
+    bool HasTrackOffsets => HasColumn("List_UpgradeCarBodyTrackSpacingFront", "Spacing") &&
+        HasColumn("List_UpgradeCarBodyTrackSpacingRear", "Spacing");
+    bool HasNativeTrackOffsets => !HasTrackOffsets && new[] { "Id", "FrontOffset", "RearOffset", "UpgradeFrontOffset", "UpgradeRearOffset" }
+        .All(c => HasColumn("CarTrackOffsets", c));
+    Dictionary<long, Dictionary<string, object>> _loadedNativeTrackOffsets = new();
+    bool HasEnhancedHandling => HandlingColumns.All(c => HasColumn("Data_Car", c)) &&
+        SpringHandlingColumns.All(c => HasColumn("List_SpringDamperPhysics", c)) &&
+        TireHandlingColumns.All(c => HasColumn("List_UpgradeTireCompound", c)) &&
+        _schema.ContainsKey("List_UpgradeTireCompoundFictionModOverride");
     readonly HashSet<string> _motorMedia = new();   // fallback for cars absent from the embedded stock reference
     HashSet<long> _referenceCars = new();           // car Ids whose original powertrain is known from stock
     HashSet<long> _originalEvCars = new();          // stock cars that originally had an electric motor
@@ -151,7 +164,6 @@ public partial class CarEditorView : UserControl
     readonly Dictionary<(string Table, long BodyId), HashSet<long>> _batchBodyUpgradeIds = new();
     bool _updatingCarSelection;
 
-    const string StockReferenceResource = "FH6LocalCryptoTool.gamedbRC.stock.sqlite.gz";
     static readonly string[] CarOrdinalTables =
     {
         "List_UpgradeAntiSwayFront", "List_UpgradeAntiSwayRear", "List_UpgradeBrakes",
@@ -315,7 +327,11 @@ public partial class CarEditorView : UserControl
     }
     void CarList_Changed(object s, SelectionChangedEventArgs e)
     {
-        if (!_updatingCarSelection && !_batchRunning) PickCar();
+        if (!_updatingCarSelection && !_batchRunning)
+        {
+            try { PickCar(); }
+            catch (Exception ex) { Log("car selection failed: " + ex.Message, "err"); }
+        }
     }
     void Filt_Changed(object s, RoutedEventArgs e)
     {
@@ -646,49 +662,39 @@ public partial class CarEditorView : UserControl
     // ============================================================ embedded stock reference
     void PrepareEmbeddedStockReference()
     {
-        try
-        {
-            string directory = Path.Combine(Path.GetTempPath(), "FH6LocalCryptoTool");
-            Directory.CreateDirectory(directory);
-            _stockReferencePath = Path.Combine(directory, $"gamedbRC.stock.v1.2.4.{Environment.ProcessId}.sqlite");
-
-            using Stream packed = Assembly.GetExecutingAssembly().GetManifestResourceStream(StockReferenceResource)
-                ?? throw new InvalidOperationException("the embedded stock database resource is missing");
-            using (var gzip = new GZipStream(packed, CompressionMode.Decompress))
-            using (var output = new FileStream(_stockReferencePath, FileMode.Create, FileAccess.Write, FileShare.Read))
-                gzip.CopyTo(output);
-
-            StockReferenceStatus.Text = "Embedded stock reference ready";
-        }
-        catch (Exception ex)
-        {
-            _stockReferencePath = null;
-            StockReferenceStatus.Text = "Embedded stock reference unavailable";
-            Log("stock reference could not be prepared: " + ex.Message, "warn");
-        }
+        _stockReferencePath = null;
+        StockReferenceStatus.Text = "Stock reference will be matched to the loaded DB version";
     }
 
     void AttachStockReference()
     {
         _stockReferenceAttached = false;
         RestoreCarBtn.IsEnabled = false;
-        if (string.IsNullOrWhiteSpace(_stockReferencePath) || !File.Exists(_stockReferencePath))
-            PrepareEmbeddedStockReference();
-        if (string.IsNullOrWhiteSpace(_stockReferencePath) || !File.Exists(_stockReferencePath))
+        if (!HasAutoshow)
         {
-            StockReferenceStatus.Text = "Embedded stock reference unavailable (see activity log)";
+            _stockReferencePath = null;
+            StockReferenceStatus.Text = "Motorsport DB · no verified embedded stock reference";
+            Log("Motorsport-compatible schema: FH6 stock restore, Autoshow and enhanced Lotus handling are disabled", "info");
             return;
         }
-
         try
         {
+            // Re-select on every load, not just the first one. Unknown versions must
+            // never restore cars or report modifications against the wrong stock DB.
+            _stockReferencePath = StockDatabaseCatalog.Find(_workPath);
+            if (_stockReferencePath == null)
+            {
+                StockReferenceStatus.Text = "No embedded stock reference matches this DB version";
+                Log("stock comparison/restore disabled: no matching embedded version for this GameDB", "warn");
+                return;
+            }
             Exec("ATTACH DATABASE ? AS stockref", _stockReferencePath);
             string integrity = Convert.ToString(Scalar("PRAGMA stockref.integrity_check"));
             long cars = ScalarL("SELECT COUNT(*) FROM stockref.Data_Car") ?? 0;
             if (!string.Equals(integrity, "ok", StringComparison.OrdinalIgnoreCase) || cars == 0)
                 throw new InvalidDataException("the embedded database did not pass its integrity check");
             _stockReferenceAttached = true;
-            StockReferenceStatus.Text = $"Embedded stock reference · {cars} cars";
+            StockReferenceStatus.Text = $"Stock stamp {StockDatabaseCatalog.Version(_workPath)} · {cars} cars";
         }
         catch (Exception ex)
         {
@@ -1118,6 +1124,7 @@ public partial class CarEditorView : UserControl
             Pooling = false
         }.ToString());
         _conn.Open();
+        ReadSchema();
         Exec("PRAGMA foreign_keys=OFF");
         AttachStockReference();
         IndexDb();
@@ -1127,6 +1134,19 @@ public partial class CarEditorView : UserControl
         ReloadBtn.IsEnabled = ExportBtn.IsEnabled = AddFeBtn.IsEnabled = RemoveFeBtn.IsEnabled =
             AllPriceOneBtn.IsEnabled = RevertPricesBtn.IsEnabled =
             BestHandlingBtn.IsEnabled = RevertHandlingBtn.IsEnabled = true;
+        AddFeBtn.IsEnabled = RemoveFeBtn.IsEnabled = HasAutoshow;
+        AddFeBtn.ToolTip = RemoveFeBtn.ToolTip = HasAutoshow ? null : "This database has no Horizon Autoshow availability field.";
+        BestHandlingBtn.IsEnabled = RevertHandlingBtn.IsEnabled = HasEnhancedHandling;
+        BestHandlingBtn.ToolTip = HasEnhancedHandling ? null : "Enhanced Lotus handling requires FH6-specific physics fields not present in this database.";
+        OptAspect.IsEnabled = SWBoxes.IsEnabled = AddSWBtn.IsEnabled = HasProfileOffsets;
+        OptTrack.IsEnabled = OFBoxes.IsEnabled = ORBoxes.IsEnabled = AddOFBtn.IsEnabled = AddORBtn.IsEnabled = HasTrackOffsets;
+        if (!HasProfileOffsets) OptAspect.IsChecked = false;
+        if (!HasTrackOffsets) OptTrack.IsChecked = false;
+        OptAspect.ToolTip = HasProfileOffsets ? null : "This database has no tire-profile upgrade tables.";
+        OptTrack.ToolTip = HasTrackOffsets ? null : "This database has no track-spacing upgrade tables.";
+        FmTrackPanel.Visibility = HasNativeTrackOffsets ? Visibility.Visible : Visibility.Collapsed;
+        AllPriceOneBtn.Content = HasAutoshow ? "All cars = 1 CR" : "BaseCost = 1";
+        AllPriceOneBtn.ToolTip = HasAutoshow ? "Set every car's BaseCost to 1." : "Edit Data_Car.BaseCost only. Motorsport purchase prices may use another source; 1 CR in-game is not verified.";
         RenderCars();
         Status.Text = $"{Path.GetFileName(_origPath)}   ·   {_cars.Count} cars   ·   {_engines.Count} engines";
         LoadedDbPath.Text = _origPath;
@@ -1243,6 +1263,36 @@ public partial class CarEditorView : UserControl
     }
 
     // ============================================================ SQL helpers
+    void ReadSchema()
+    {
+        _schema.Clear();
+        foreach (var table in Query("SELECT name FROM sqlite_schema WHERE type='table'"))
+        {
+            string name = (string)table["name"];
+            _schema[name] = Query("SELECT name FROM pragma_table_info(?)", name)
+                .Select(r => (string)r["name"]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        _loadedNativeTrackOffsets = HasNativeTrackOffsets
+            ? Query("SELECT * FROM CarTrackOffsets").ToDictionary(r => Convert.ToInt64(r["Id"]))
+            : new();
+    }
+
+    bool HasColumn(string table, string column) => _schema.TryGetValue(table, out var columns) && columns.Contains(column);
+
+    // These are optional metadata/settings absent from FM's older schema. Core
+    // identity/physics fields are never silently discarded.
+    static readonly HashSet<string> OptionalUpgradeColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "releaseOrder", "UseBlowOffDamper", "PreloadAndDroopDamperID", "SteeringSettingsProfileID",
+        "FrontTirePressure", "RearTirePressure", "FrontTrackSpacerOffset", "RearTrackSpacerOffset"
+    };
+
+    void InsertUpgrade(string table, string columns, params object[] values)
+    {
+        string[] names = columns.Split(',');
+        if (names.Length != values.Length) throw new ArgumentException("Upgrade column/value count mismatch.");
+        InsertClonedRow(table, names.Select((name, i) => (name, value: values[i])).ToDictionary(p => p.name, p => p.value));
+    }
     SqliteCommand Cmd(string sql, object[] p)
     {
         var cmd = _conn.CreateCommand();
@@ -1357,6 +1407,8 @@ public partial class CarEditorView : UserControl
         var c = CarList.SelectedItem as CarItem ?? selected[^1];
         _car = c;
         bool batch = selected.Count > 1;
+        FmTrackPanel.IsEnabled = !batch;
+        if (batch) OptFmTrack.IsChecked = false;
         AddBodyKitBtn.IsEnabled = RemoveBodyKitBtn.IsEnabled = false;
         BodyTargets.IsEnabled = !batch;
         ShowSingleCarFitmentAddButtons(!batch);
@@ -1384,7 +1436,7 @@ public partial class CarEditorView : UserControl
             PopulateBodyTargets(c.Id);
             PrepareBatchFitmentTemplate();
             PopulateBatchPowerBuilder(selected);
-            bool[] autoshow = selected.Select(x => (ScalarL("SELECT NotAvailableInAutoshow FROM Data_Car WHERE Id=?", x.Id) ?? 1) == 0).ToArray();
+            bool[] autoshow = selected.Select(x => HasAutoshow && (ScalarL("SELECT NotAvailableInAutoshow FROM Data_Car WHERE Id=?", x.Id) ?? 1) == 0).ToArray();
             OptAutoshow.IsThreeState = true;
             OptAutoshow.IsChecked = autoshow.All(x => x) ? true : autoshow.All(x => !x) ? false : null;
             CarInfo.Text = $"BATCH MODE    {selected.Count} cars selected\n" +
@@ -1422,7 +1474,8 @@ public partial class CarEditorView : UserControl
         var c = _car;
         var engN = ScalarL("SELECT COUNT(*) FROM List_UpgradeEngine WHERE Ordinal=?", c.Id) ?? 0;
         var stock = Query("SELECT de.EngineName n FROM List_UpgradeEngine le LEFT JOIN Data_Engine de ON de.EngineID=le.EngineID WHERE le.Ordinal=? AND le.IsStock=1", c.Id);
-        var dc = Query("SELECT DriveTypeID,NumGears,Displacement,TireBrandID,NotAvailableInAutoshow FROM Data_Car WHERE Id=?", c.Id).FirstOrDefault();
+        string availability = HasAutoshow ? "NotAvailableInAutoshow" : "NULL AS NotAvailableInAutoshow";
+        var dc = Query($"SELECT DriveTypeID,NumGears,Displacement,TireBrandID,{availability} FROM Data_Car WHERE Id=?", c.Id).FirstOrDefault();
         string dt = dc == null ? "?" : (Convert.ToInt64(dc["DriveTypeID"]) switch { 1 => "FWD", 2 => "RWD", 3 => "AWD", _ => "?" });
         string se = stock.Count > 0 && stock[0]["n"] != null ? (string)stock[0]["n"] : "— (electric)";
         bool inShow = dc != null && Convert.ToInt64(dc["NotAvailableInAutoshow"] ?? 0L) == 0;
@@ -1433,10 +1486,11 @@ public partial class CarEditorView : UserControl
             $"Drive/gears   {dt} · {dc?["NumGears"]}\n" +
             $"Displacement  {dc?["Displacement"]} cc\n" +
             $"Tire brand    {dc?["TireBrandID"]}\n" +
-            $"Autoshow      {(inShow ? "yes" : "no")}";
+            $"Autoshow      {(HasAutoshow ? (inShow ? "yes" : "no") : "not applicable (Motorsport)")}";
         // reflect current autoshow state without firing the Click handler (Click ≠ programmatic IsChecked)
-        OptAutoshow.IsEnabled = true;
-        OptAutoshow.IsChecked = inShow;
+        OptAutoshow.IsEnabled = HasAutoshow;
+        OptAutoshow.ToolTip = HasAutoshow ? null : "Motorsport does not use Horizon's NotAvailableInAutoshow field.";
+        OptAutoshow.IsChecked = HasAutoshow && inShow;
         // Manual transmission only makes sense on a car that is currently electric: it must have a stock
         // motor AND no stock engine. That disables it for native ICE, EV→ICE conversions, and any car that
         // had an engine set as stock this session — while staying on for native EVs and ICE→EV swaps.
@@ -1860,7 +1914,7 @@ public partial class CarEditorView : UserControl
 
     void Autoshow_Click(object s, RoutedEventArgs e)
     {
-        if (_car == null) return;
+        if (_car == null || !HasAutoshow) return;
         bool avail = OptAutoshow.IsChecked == true;
         var targets = SelectedCars();
         foreach (var car in targets)
@@ -1873,7 +1927,7 @@ public partial class CarEditorView : UserControl
 
     void SetFeCarsAutoshowAvailability(bool available)
     {
-        if (_conn == null) return;
+        if (_conn == null || !HasAutoshow) return;
         const string feCars = @"MediaName GLOB '*FE_[0-9][0-9]'
                                 OR MediaName GLOB '*FE_[0-9][0-9][0-9][0-9]'";
         long total = ScalarL($"SELECT COUNT(*) FROM Data_Car WHERE {feCars}") ?? 0;
@@ -1893,9 +1947,11 @@ public partial class CarEditorView : UserControl
     void SetAllCarPricesToOne()
     {
         if (_conn == null) return;
-        int changed = Exec("UPDATE Data_Car SET BaseCost=1 WHERE BaseCost<>1");
+        int changed = Exec("UPDATE Data_Car SET BaseCost=1 WHERE BaseCost IS NULL OR BaseCost<>1");
         RefreshModifiedAfterExcludedEdit();
-        Log($"set {changed} car prices to 1 CR", "ok");
+        long total = ScalarL("SELECT COUNT(*) FROM Data_Car WHERE BaseCost=1") ?? 0;
+        Log($"set {changed} car prices to 1 CR · {total} cars verified at BaseCost=1 in the working copy", "ok");
+        Log("Export the edited SQLite, then re-encrypt that exported file in Crypto; the loaded source file is unchanged.", "info");
     }
 
     void RevertAllCarPrices()
@@ -2020,6 +2076,7 @@ public partial class CarEditorView : UserControl
     void ApplyBestHandling()
     {
         if (_conn == null || _car == null) { Log("pick a car first", "warn"); return; }
+        if (!HasEnhancedHandling) { Log("enhanced Lotus handling is unavailable for this database schema", "warn"); return; }
         var donor = BestHandlingDonor();
         if (donor == null) { Log("Lotus handling skipped: LOT_00_ExigeWTA_18 is not in this DB", "warn"); return; }
         EnhanceLotusDataCar(donor);
@@ -2781,12 +2838,26 @@ public partial class CarEditorView : UserControl
         // created by an older build whose generated row IDs were appended.
         FillDyn(WFBoxes, _wf, "SELECT FrontTireWidth v FROM List_UpgradeCarBodyTireWidthFront WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0", body);
         FillDyn(WRBoxes, _wr, "SELECT RearTireWidth v FROM List_UpgradeCarBodyTireWidthRear WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0", body);
-        FillDyn(SWBoxes, _sw, "SELECT FrontTireAspectRatioOffset v FROM List_UpgradeCarBodyTireAspectRatioFront WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.##", body);
+        if (HasProfileOffsets)
+            FillDyn(SWBoxes, _sw, "SELECT FrontTireAspectRatioOffset v FROM List_UpgradeCarBodyTireAspectRatioFront WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.##", body);
+        else { SWBoxes.Children.Clear(); _sw.Clear(); }
         // New widebodies have no non-stock rows, so these begin blank. Once Apply
         // creates custom offsets, switching back to the tab reads them from the DB.
-        FillDyn(OFBoxes, _ofF, "SELECT Spacing v FROM List_UpgradeCarBodyTrackSpacingFront WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.###", body);
-        FillDyn(ORBoxes, _ofR, "SELECT Spacing v FROM List_UpgradeCarBodyTrackSpacingRear WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.###", body);
+        if (HasTrackOffsets)
+        {
+            FillDyn(OFBoxes, _ofF, "SELECT Spacing v FROM List_UpgradeCarBodyTrackSpacingFront WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.###", body);
+            FillDyn(ORBoxes, _ofR, "SELECT Spacing v FROM List_UpgradeCarBodyTrackSpacingRear WHERE CarBodyId=? AND IsStock=0 ORDER BY v,Id", "0.###", body);
+        }
+        else { OFBoxes.Children.Clear(); ORBoxes.Children.Clear(); _ofF.Clear(); _ofR.Clear(); }
         AddSingleCarBodyFitmentStepButtons();
+        if (HasNativeTrackOffsets && _car != null)
+        {
+            var row = Query("SELECT * FROM CarTrackOffsets WHERE Id=?", _car.Id).FirstOrDefault();
+            var boxes = new[] { FmTrackFront, FmTrackRear, FmTrackUpgradeFront, FmTrackUpgradeRear };
+            var columns = new[] { "FrontOffset", "RearOffset", "UpgradeFrontOffset", "UpgradeRearOffset" };
+            for (int i = 0; i < boxes.Length; i++) boxes[i].Text = Convert.ToDouble(row?[columns[i]] ?? 0d).ToString("0.######", CultureInfo.CurrentCulture);
+            OptFmTrack.IsChecked = false;
+        }
     }
 
     void FillBodyGeometry(long bodyId)
@@ -2853,8 +2924,14 @@ public partial class CarEditorView : UserControl
                     "List_UpgradeCarBodyTireWidthFront","List_UpgradeCarBodyTireWidthRear",
                     "List_UpgradeCarBodyTireAspectRatioFront","List_UpgradeCarBodyTireAspectRatioRear",
                     "List_UpgradeCarBodyTrackSpacingFront","List_UpgradeCarBodyTrackSpacingRear" })
-                    Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
+                    if (_schema.ContainsKey(t)) Exec($"DELETE FROM \"{t}\" WHERE CarBodyId=? AND IsStock=0", bd);
             MarkModified(_car.Id);
+            if (HasNativeTrackOffsets)
+            {
+                Exec("DELETE FROM CarTrackOffsets WHERE Id=?", _car.Id);
+                if (_loadedNativeTrackOffsets.TryGetValue(_car.Id, out var originalTrack)) InsertClonedRow("CarTrackOffsets", originalTrack);
+                Log("FM direct track offsets restored to their loaded values", "info");
+            }
             Log($"↺ fitment reset to stock on {bodies.Length} body/bodies", "ok");
             FillFitment();
         }
@@ -2964,8 +3041,8 @@ public partial class CarEditorView : UserControl
         if ((ScalarL("SELECT COUNT(*) FROM List_UpgradeEngine WHERE Ordinal=? AND EngineID=?", carId, eid) ?? 0) > 0)
         { if (!quiet) Log("already on car: " + EngName(eid), "warn"); return false; }
         long id = NextId("List_UpgradeEngine", carId), lvl = NextLevel("List_UpgradeEngine", "Ordinal", carId);
-        Exec(@"INSERT INTO List_UpgradeEngine (Id,Ordinal,Level,EngineID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,DragScale,WindInstabilityScale,releaseOrder)
-               VALUES (?,?,?,?,0,?,50,0,0,1,1,0)", id, carId, lvl, eid, EngManuf(eid));
+        InsertUpgrade("List_UpgradeEngine", "Id,Ordinal,Level,EngineID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,DragScale,WindInstabilityScale,releaseOrder",
+            id, carId, lvl, eid, 0, EngManuf(eid), 50, 0, 0, 1, 1, 0);
         MarkModified(carId);
         if (!quiet) Log("＋ swap added: " + EngName(eid), "ok");
         return true;
@@ -3037,8 +3114,8 @@ public partial class CarEditorView : UserControl
             else
             {
                 long id = NextId("List_UpgradeEngine", carId);
-                Exec(@"INSERT INTO List_UpgradeEngine (Id,Ordinal,Level,EngineID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,DragScale,WindInstabilityScale,releaseOrder)
-                       VALUES (?,?,0,?,1,?,0,0,0,1,1,0)", id, carId, eid, manufacturer);
+                InsertUpgrade("List_UpgradeEngine", "Id,Ordinal,Level,EngineID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,DragScale,WindInstabilityScale,releaseOrder",
+                    id, carId, 0, eid, 1, manufacturer, 0, 0, 0, 1, 1, 0);
             }
             // ICE and EV menus are mutually exclusive, including non-stock swap options.
             Exec("DELETE FROM List_UpgradeMotor WHERE Ordinal=?", carId);
@@ -3079,8 +3156,8 @@ public partial class CarEditorView : UserControl
         { if (!quiet) Log("already on car: " + MotorName(motorId), "warn"); return false; }
         long id = NextId("List_UpgradeMotor", carId), lvl = NextLevel("List_UpgradeMotor", "Ordinal", carId);
         long manu = ScalarL("SELECT ManufacturerID FROM List_UpgradeMotor WHERE MotorID=? AND IsStock=1 LIMIT 1", motorId) ?? 0;
-        Exec(@"INSERT INTO List_UpgradeMotor (Id,Ordinal,Level,MotorID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,releaseOrder)
-               VALUES (?,?,?,?,0,?,50,0,0,0)", id, carId, lvl, motorId, manu);
+        InsertUpgrade("List_UpgradeMotor", "Id,Ordinal,Level,MotorID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,releaseOrder",
+            id, carId, lvl, motorId, 0, manu, 50, 0, 0, 0);
         MarkModified(carId);
         if (!quiet) { Log("＋ motor option added: " + MotorName(motorId), "ok"); RefreshCar(); }
         return true;
@@ -3146,8 +3223,8 @@ public partial class CarEditorView : UserControl
             // 3. install the motor as the stock (and only) powertrain
             Exec("DELETE FROM List_UpgradeMotor WHERE Ordinal=?", carId);
             long mid = NextId("List_UpgradeMotor", carId);
-            Exec(@"INSERT INTO List_UpgradeMotor (Id,Ordinal,Level,MotorID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,releaseOrder)
-                   VALUES (?,?,0,?,1,?,0,0,0,0)", mid, carId, motorId, manu);
+            InsertUpgrade("List_UpgradeMotor", "Id,Ordinal,Level,MotorID,IsStock,ManufacturerID,Price,MassDiff,WeightDistDiff,releaseOrder",
+                mid, carId, 0, motorId, 1, manu, 0, 0, 0, 0);
             // 4. fit the EV single-speed drivetrain (RWD/FWD upgrade options can still be added on top via Apply)
             if (ddt != null && (ScalarL("SELECT COUNT(*) FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=1", carId) ?? 0) > 0)
                 Exec("UPDATE List_UpgradeDrivetrain SET DrivetrainID=?,PowertrainId=?,ManufacturerId=? WHERE Ordinal=? AND IsStock=1",
@@ -3177,6 +3254,16 @@ public partial class CarEditorView : UserControl
         long carId = _car.Id;
         try
         {
+            double[] nativeTrack = null;
+            if (HasNativeTrackOffsets && OptFmTrack.IsChecked == true)
+            {
+                if (SelectedCars().Count != 1) { Log("select one car for direct FM track-offset editing", "warn"); return; }
+                nativeTrack = new double[4];
+                var boxes = new[] { FmTrackFront, FmTrackRear, FmTrackUpgradeFront, FmTrackUpgradeRear };
+                for (int i = 0; i < boxes.Length; i++)
+                    if (!NumericText.TryParseDouble(boxes[i].Text, out nativeTrack[i]) || !double.IsFinite(nativeTrack[i]) || Math.Abs(nativeTrack[i]) > 1)
+                    { Log("FM track offsets must be finite numbers from -1 to +1 metre", "warn"); return; }
+            }
             // Validate before any UPDATE/DELETE. An unparseable nonblank fitment
             // box must never turn into an empty request that clears upgrade rows.
             if ((OptRims.IsChecked == true && !ValidateFitmentNumbers(_rf, "rim size")) ||
@@ -3209,8 +3296,8 @@ public partial class CarEditorView : UserControl
                 else if ((ScalarL("SELECT COUNT(*) FROM Data_Drivetrain WHERE DrivetrainID=2170") ?? 0) > 0)
                 {
                     long id = NextId("List_UpgradeDrivetrain", carId), lvl = NextLevel("List_UpgradeDrivetrain", "Ordinal", carId);
-                    Exec(@"INSERT INTO List_UpgradeDrivetrain (Id,Ordinal,DrivetrainID,PowertrainId,MassDiff,WeightDistDiff,Level,ManufacturerId,Price,IsStock,releaseOrder)
-                           VALUES (?,?,2170,2,-61.962985,-0.02,?,492,50,0,0)", id, carId, lvl);
+                    InsertUpgrade("List_UpgradeDrivetrain", "Id,Ordinal,DrivetrainID,PowertrainId,MassDiff,WeightDistDiff,Level,ManufacturerId,Price,IsStock,releaseOrder",
+                        id, carId, 2170, 2, -61.962985, -0.02, lvl, 492, 50, 0, 0);
                     Log("✓ RWD conversion option added", "ok");
                 }
                 else Log("RWD skipped: drivetrain 2170 not in this DB", "warn");
@@ -3226,8 +3313,8 @@ public partial class CarEditorView : UserControl
                     (ScalarL("SELECT COUNT(*) FROM List_UpgradeDrivetrain WHERE Ordinal=? AND IsStock=0 AND DrivetrainID=?", carId, fwd["d"]) ?? 0) == 0)
                 {
                     long id = NextId("List_UpgradeDrivetrain", carId), lvl = NextLevel("List_UpgradeDrivetrain", "Ordinal", carId);
-                    Exec(@"INSERT INTO List_UpgradeDrivetrain (Id,Ordinal,DrivetrainID,PowertrainId,MassDiff,WeightDistDiff,Level,ManufacturerId,Price,IsStock,releaseOrder)
-                           VALUES (?,?,?,?,0,0,?,?,50,0,0)", id, carId, fwd["d"], fwd["p"], lvl, fwd["m"]);
+                    InsertUpgrade("List_UpgradeDrivetrain", "Id,Ordinal,DrivetrainID,PowertrainId,MassDiff,WeightDistDiff,Level,ManufacturerId,Price,IsStock,releaseOrder",
+                        id, carId, fwd["d"], fwd["p"], 0, 0, lvl, fwd["m"], 50, 0, 0);
                     Log("✓ FWD conversion option added (experimental)", "ok");
                 }
                 else if (fwd != null) Log("FWD conversion already present — no duplicate added", "info");
@@ -3275,9 +3362,9 @@ public partial class CarEditorView : UserControl
                     {
                         if (!existing.Add(dia)) continue;
                         long level = Math.Min(slot, terminalLevel);
-                        Exec($"INSERT INTO \"{t}\" (Id,Ordinal,Level,IsStock,{col},Price,MassDiff,DragScale,WindInstabilityScale,RequiresGraphics) VALUES (?,?,?,0,?,?,?,1,1,0)",
+                        InsertUpgrade(t, $"Id,Ordinal,Level,IsStock,{col},Price,MassDiff,DragScale,WindInstabilityScale,RequiresGraphics",
                             appendMode ? NextId(t, carId) : carId * 1000 + slot,
-                            carId, level, dia, 50, Math.Round(1.36 * (dia - (stock ?? dia)), 2));
+                            carId, level, 0, dia, 50, Math.Round(1.36 * (dia - (stock ?? dia)), 2), 1, 1, 0);
                         slot++;
                     }
                     SortUpgradeRowsByValue(t, "Ordinal", carId, col);
@@ -3339,9 +3426,9 @@ public partial class CarEditorView : UserControl
                                 ? Convert.ToInt64(oldLevels[slot - 1]["Level"])
                                 : (preservedLevelCount == 0 && slot <= 3 ? slot : terminalLevel))
                             : (oldLevels.Count == 0 ? Math.Min(++firstAdded, 3) : terminalLevel);
-                        Exec($"INSERT INTO \"{t}\" (Id,CarBodyId,Level,IsStock,{col},Price,MassDiff,DragScale,WindInstabilityScale,RequiresGraphics,releaseOrder) VALUES (?,?,?,0,?,?,?,1,1,0,0)",
+                        InsertUpgrade(t, $"Id,CarBodyId,Level,IsStock,{col},Price,MassDiff,DragScale,WindInstabilityScale,RequiresGraphics,releaseOrder",
                             appendMode ? FreeBodyUpgradeId(t, bd, slot) : FitId(bd, slot),
-                            bd, level, width, 2000 + 200 * slot, Math.Round(0.54 * slot, 2));
+                            bd, level, 0, width, 2000 + 200 * slot, Math.Round(0.54 * slot, 2), 1, 1, 0, 0);
                         slot++;
                     }
                     SortUpgradeRowsByValue(t, "CarBodyId", bd, col);
@@ -3350,7 +3437,7 @@ public partial class CarEditorView : UserControl
                 Log($"✓ tire widths {(_batchRunning || relativeWidths ? "extended from existing choices on" : "set on")} {fitBodies.Length} body/bodies", "ok");
             }
 
-            if (OptAspect.IsChecked == true)
+            if (HasProfileOffsets && OptAspect.IsChecked == true)
             {
                 var profileEntries = _sw.Select(box => (Value: OptNum(box), Relative: IsFitmentDelta(box)))
                     .Where(entry => entry.Value.HasValue).ToList();
@@ -3386,8 +3473,8 @@ public partial class CarEditorView : UserControl
                                 Math.Abs(Math.Round(current, 2) - value) < 0.000001)) continue;
                         // Working extended databases keep every profile option at
                         // Level 1; the unique Id is what distinguishes each tile.
-                        Exec($"INSERT INTO \"{t}\" (Id,CarBodyId,{col},IsStock,Level,Price,releaseOrder) VALUES (?,?,?,0,1,0,0)",
-                            appendProfiles ? FreeBodyUpgradeId(t, bd, slot) : FitId(bd, slot), bd, value);
+                        InsertUpgrade(t, $"Id,CarBodyId,{col},IsStock,Level,Price,releaseOrder",
+                            appendProfiles ? FreeBodyUpgradeId(t, bd, slot) : FitId(bd, slot), bd, value, 0, 1, 0, 0);
                         existing.Add(value);
                         slot++;
                     }
@@ -3397,7 +3484,7 @@ public partial class CarEditorView : UserControl
                     string.Join(", ", profileEntries.Select(entry => entry.Value!.Value)), "ok");
             }
 
-            if (OptTrack.IsChecked == true)
+            if (HasTrackOffsets && OptTrack.IsChecked == true)
             {
                 // Track spacing has three meaningful levels. Further uniquely-ID'd
                 // entries repeat terminal level 3 so every menu tile remains valid.
@@ -3439,8 +3526,8 @@ public partial class CarEditorView : UserControl
                         if (existing.Any(current =>
                                 Math.Abs(Math.Round(current, 3) - v) < 0.000001)) continue;
                         int level = Math.Min(lvl, 3);
-                        Exec($"INSERT INTO \"{t}\" (Id,CarBodyId,Spacing,IsStock,Level,Price,releaseOrder) VALUES (?,?,?,0,?,?,0)",
-                            appendMode ? FreeBodyUpgradeId(t, bd, lvl) : FitId(bd, lvl), bd, v, level, 100 * lvl);
+                        InsertUpgrade(t, "Id,CarBodyId,Spacing,IsStock,Level,Price,releaseOrder",
+                            appendMode ? FreeBodyUpgradeId(t, bd, lvl) : FitId(bd, lvl), bd, v, 0, level, 100 * lvl, 0);
                         existing.Add(v);
                         lvl++;
                     }
@@ -3448,6 +3535,15 @@ public partial class CarEditorView : UserControl
                 }
                 bool relativeTrack = _ofF.Any(IsFitmentDelta) || _ofR.Any(IsFitmentDelta);
                 Log($"✓ track width / offset {(_batchRunning || relativeTrack ? "extended from each body's widest existing value on" : "set on")} {fitBodies.Length} body/bodies", "ok");
+            }
+
+            if (nativeTrack != null)
+            {
+                long rows = ScalarL("SELECT COUNT(*) FROM CarTrackOffsets WHERE Id=?", carId) ?? 0;
+                if (rows > 1) throw new InvalidOperationException("Multiple CarTrackOffsets rows exist for this car; direct editing refused.");
+                if (rows == 0) InsertUpgrade("CarTrackOffsets", "Id,FrontOffset,RearOffset,UpgradeFrontOffset,UpgradeRearOffset", carId, nativeTrack[0], nativeTrack[1], nativeTrack[2], nativeTrack[3]);
+                else Exec("UPDATE CarTrackOffsets SET FrontOffset=?,RearOffset=?,UpgradeFrontOffset=?,UpgradeRearOffset=? WHERE Id=?", nativeTrack.Cast<object>().Append(carId).ToArray());
+                Log("FM CarTrackOffsets updated directly (base and upgraded offsets); in-game fitment verification required", "ok");
             }
 
             if (OptWhite.IsChecked == true) ApplyWhitewalls(carId);
@@ -3505,7 +3601,11 @@ public partial class CarEditorView : UserControl
 
     void InsertClonedRow(string table, Dictionary<string, object> row)
     {
-        string[] cols = row.Keys.ToArray();
+        if (HasColumn(table, "CarPoint") && !row.ContainsKey("CarPoint")) row["CarPoint"] = 0L;
+        foreach (string column in row.Keys)
+            if (!HasColumn(table, column) && !OptionalUpgradeColumns.Contains(column))
+                throw new InvalidOperationException($"{table}.{column} is not supported by this database schema.");
+        string[] cols = row.Keys.Where(c => HasColumn(table, c)).ToArray();
         string names = string.Join(",", cols.Select(c => $"\"{c.Replace("\"", "\"\"")}\""));
         object[] vals = cols.Select(c => row[c]).ToArray();
         Exec($"INSERT INTO \"{table}\" ({names}) VALUES ({string.Join(",", cols.Select(_ => "?"))})", vals);
@@ -3942,7 +4042,7 @@ public partial class CarEditorView : UserControl
             r["IsStock"] = ((string)r["TireModelName"] == "Sport") ? 1L : 0L;
             r["Price"] = Convert.ToInt64(r["IsStock"]) == 1 ? 0L : 50L;
             var vals = cols.Select(c => r.ContainsKey(c) ? r[c] : null).ToArray();
-            Exec($"INSERT INTO List_UpgradeTireCompound ({string.Join(",", cols)}) VALUES ({string.Join(",", cols.Select(_ => "?"))})", vals);
+            InsertUpgrade("List_UpgradeTireCompound", string.Join(",", cols), vals);
             i++;
         }
         if ((ScalarL("SELECT COUNT(*) FROM List_UpgradeTireCompound WHERE Ordinal=? AND IsStock=1", carId) ?? 0) == 0)
@@ -3978,7 +4078,7 @@ public partial class CarEditorView : UserControl
             r["IsStock"] = makeStock ? 1L : 0L;
             r["Price"] = makeStock ? 0L : 50L;
             var vals = cols.Select(c => r.ContainsKey(c) ? r[c] : null).ToArray();
-            Exec($"INSERT INTO List_UpgradeTireCompound ({string.Join(",", cols)}) VALUES ({string.Join(",", cols.Select(_ => "?"))})", vals);
+            InsertUpgrade("List_UpgradeTireCompound", string.Join(",", cols), vals);
             stockAdded |= makeStock;
             added++;
         }

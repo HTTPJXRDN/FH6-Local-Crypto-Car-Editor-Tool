@@ -214,7 +214,7 @@
     </Grid>
 
     <Expander Grid.Row="3" Margin="0,12,0,0" Foreground="{DynamicResource Ink}"
-              Header="MANAGE CLIPD CHANNELS — add or remove complete animations (advanced)">
+              Header="[WIP] MANAGE CLIPD CHANNELS — add or remove complete animations (advanced)">
       <Border Style="{DynamicResource PremiumCard}" Padding="14,12">
         <Grid>
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>

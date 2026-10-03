@@ -1,0 +1,177 @@
+<UserControl x:Class="FH6LocalCryptoTool.DbBrowser.DbBrowserView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" AllowDrop="True" Drop="File_Drop" DragOver="File_DragOver"
+ Background="#1D1D1F" Foreground="#F4F4F6" FontSize="12" Loaded="View_Loaded" PreviewKeyDown="Browser_KeyDown">
+ <UserControl.Resources>
+  <SolidColorBrush x:Key="DbPink" Color="#E8175D"/>
+  <LinearGradientBrush x:Key="DbHeaderGradient" StartPoint="0,0" EndPoint="0,1">
+   <GradientStop Color="#FF3A3A3F" Offset="0"/><GradientStop Color="#FF303034" Offset="1"/>
+  </LinearGradientBrush>
+  <LinearGradientBrush x:Key="DbHeaderAccent" StartPoint="0,0" EndPoint="1,0">
+   <GradientStop Color="#FFE8175D" Offset="0"/><GradientStop Color="#66E8175D" Offset="0.55"/><GradientStop Color="#00E8175D" Offset="1"/>
+  </LinearGradientBrush>
+  <Style x:Key="DbHeader" TargetType="Border">
+   <Setter Property="Background" Value="{StaticResource DbHeaderGradient}"/><Setter Property="BorderBrush" Value="{StaticResource DbHeaderAccent}"/>
+   <Setter Property="Padding" Value="20,11"/><Setter Property="BorderThickness" Value="0,0,0,2"/>
+  </Style>
+  <Style TargetType="TextBlock"><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style TargetType="Button">
+   <Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Background" Value="#333337"/>
+   <Setter Property="BorderBrush" Value="#454549"/><Setter Property="Padding" Value="12,7"/><Setter Property="Margin" Value="0,0,6,0"/>
+   <Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border x:Name="Border" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Border><ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Border" Property="BorderBrush" Value="#E8175D"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="TextBox">
+   <Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Background" Value="#232326"/><Setter Property="CaretBrush" Value="#E8175D"/>
+   <Setter Property="BorderBrush" Value="#454549"/><Setter Property="Padding" Value="8,6"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+  </Style>
+  <Style TargetType="ComboBox">
+   <Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Background" Value="#232326"/><Setter Property="BorderBrush" Value="#454549"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
+    <Grid><ToggleButton Focusable="False" Background="{TemplateBinding Background}" Foreground="{TemplateBinding Foreground}" BorderBrush="{TemplateBinding BorderBrush}"
+       IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+      <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="8,6"><DockPanel><TextBlock DockPanel.Dock="Right" Text=" ▾"/><ContentPresenter Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}" ContentTemplate="{Binding SelectionBoxItemTemplate, RelativeSource={RelativeSource AncestorType=ComboBox}}"/></DockPanel></Border></ControlTemplate></ToggleButton.Template>
+    </ToggleButton><Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False"><Border Background="#232326" BorderBrush="#E8175D" BorderThickness="1" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ComboBox}}"><ScrollViewer MaxHeight="320"><ItemsPresenter/></ScrollViewer></Border></Popup></Grid>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Background" Value="#232326"/><Setter Property="Padding" Value="8,5"/>
+   <Style.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="#663043"/></Trigger></Style.Triggers>
+  </Style>
+  <Style TargetType="DataGrid">
+   <Setter Property="Background" Value="#232326"/><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="BorderBrush" Value="#454549"/>
+   <Setter Property="RowBackground" Value="#232326"/><Setter Property="AlternatingRowBackground" Value="#2C2C2F"/>
+   <Setter Property="HorizontalGridLinesBrush" Value="#3C3C40"/><Setter Property="VerticalGridLinesBrush" Value="#3C3C40"/>
+   <Setter Property="GridLinesVisibility" Value="All"/><Setter Property="AutoGenerateColumns" Value="False"/>
+   <Setter Property="CanUserAddRows" Value="False"/><Setter Property="CanUserDeleteRows" Value="False"/>
+   <Setter Property="EnableRowVirtualization" Value="True"/><Setter Property="EnableColumnVirtualization" Value="True"/>
+   <Setter Property="RowHeight" Value="28"/><Setter Property="HeadersVisibility" Value="Column"/>
+  </Style>
+  <Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="#333337"/><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Padding" Value="8,6"/><Setter Property="BorderBrush" Value="#454549"/><Setter Property="BorderThickness" Value="0,0,1,1"/></Style>
+  <Style TargetType="DataGridCell"><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Padding" Value="6,3"/><Setter Property="BorderThickness" Value="0"/>
+   <Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#663043"/></Trigger></Style.Triggers>
+  </Style>
+  <Style TargetType="DataGridRow"><Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#663043"/></Trigger></Style.Triggers></Style>
+  <Style TargetType="ListBox"><Setter Property="Background" Value="#232326"/><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="BorderThickness" Value="0"/></Style>
+  <Style TargetType="ListBoxItem"><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Padding" Value="7,5"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="Item" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="#663043"/><Setter Property="Foreground" Value="#FF2E70"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="TabControl"><Setter Property="Background" Value="#1D1D1F"/><Setter Property="BorderThickness" Value="0"/></Style>
+  <Style TargetType="TabItem"><Setter Property="Foreground" Value="#9C9CA2"/><Setter Property="Padding" Value="14,9"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem"><Border x:Name="Tab" Background="#232326" BorderBrush="Transparent" BorderThickness="0,0,0,2" Margin="0,0,4,6" Padding="{TemplateBinding Padding}"><ContentPresenter ContentSource="Header"/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Foreground" Value="#E8175D"/><Setter TargetName="Tab" Property="BorderBrush" Value="#E8175D"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="TreeView"><Setter Property="Background" Value="#232326"/><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="BorderThickness" Value="0"/></Style>
+  <Style TargetType="TreeViewItem"><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Margin" Value="0,3"/></Style>
+  <Style TargetType="ContextMenu"><Setter Property="Background" Value="#2C2C2F"/><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="BorderBrush" Value="#454549"/></Style>
+  <Style TargetType="MenuItem"><Setter Property="Background" Value="#2C2C2F"/><Setter Property="Foreground" Value="#F4F4F6"/></Style>
+  <Style TargetType="Expander"><Setter Property="Foreground" Value="#F4F4F6"/><Setter Property="Background" Value="#232326"/></Style>
+ </UserControl.Resources>
+ <Grid Margin="12">
+  <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid x:Name="WorkArea">
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <Border x:Name="BrowserHeader" Style="{StaticResource DbHeader}" Margin="-12,-12,-12,18">
+    <StackPanel VerticalAlignment="Center">
+     <TextBlock FontSize="22" FontWeight="Bold"><Run Text="DB" Foreground="{StaticResource DbPink}"/><Run Text=" Browser"/></TextBlock>
+     <TextBlock Text="SQLite workspace • encrypted SLT support • originals stay untouched" Foreground="#9C9CA2" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"/>
+    </StackPanel>
+   </Border>
+   <StackPanel Grid.Row="1" Margin="0,0,0,10">
+    <WrapPanel><Button Content="New DB" Click="NewDatabase_Click"/><Button Content="Open database…" Click="Open_Click"/><Button x:Name="WriteButton" Content="Write changes" Click="Write_Click" ToolTip="Commit pending edits to the private working copy, not the input file."/>
+     <Button x:Name="RevertButton" Content="Revert changes" Click="Revert_Click" ToolTip="Undo pending edits since the last Write changes or export."/>
+     <Button x:Name="ExportButton" Content="Export as…" Click="Export_Click" Background="#E8175D" BorderBrush="#E8175D"/>
+     <Button Content="Close database" Click="Close_Click"/>
+     <Button Content="Import SQL…" Click="ImportSql_Click"/><Button Content="Export SQL…" Click="DumpSql_Click"/>
+    </WrapPanel>
+    <TextBlock x:Name="LoadedPath" Text="Open database / Drop a FH6 gamedbRC.slt or a .sqlite or Forza Motorsport gamedb.sqlite file here to begin." Foreground="#9C9CA2" Margin="0,8,0,0" TextWrapping="Wrap"/>
+   </StackPanel>
+   <Grid Grid.Row="2" x:Name="DatabaseArea" IsEnabled="False">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*" MinWidth="260"/><ColumnDefinition Width="5"/><ColumnDefinition Width="285" MinWidth="175"/></Grid.ColumnDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <TabControl x:Name="BrowserTabs" Margin="0,0,8,0">
+     <TabItem Header="Database Structure">
+      <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+       <WrapPanel Margin="0,0,0,8"><Button Content="Create table…" Click="CreateTable_Click"/><Button Content="Create index…" Click="CreateIndex_Click"/><Button Content="Modify object" Click="ModifyObject_Click"/><Button Content="Delete object" Click="DropObject_Click"/></WrapPanel>
+       <DataGrid x:Name="SchemaObjectsGrid" Grid.Row="1" IsReadOnly="True" SelectionChanged="SchemaObject_Changed" Margin="0,0,0,8"><DataGrid.Columns>
+        <DataGridTextColumn Header="Schema object" Binding="{Binding Name}" Width="*"/><DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="80"/><DataGridTextColumn Header="Table / view" Binding="{Binding TableName}" Width="*"/>
+       </DataGrid.Columns></DataGrid>
+       <DataGrid x:Name="StructureGrid" Grid.Row="2" IsReadOnly="True"><DataGrid.Columns>
+        <DataGridTextColumn Header="Column" Binding="{Binding Name}" Width="*"/><DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="110"/>
+        <DataGridCheckBoxColumn Header="Not null" Binding="{Binding NotNull}" Width="65"/><DataGridTextColumn Header="Default" Binding="{Binding Default}" Width="100"/>
+        <DataGridTextColumn Header="PK order" Binding="{Binding KeyOrder}" Width="70"/><DataGridTextColumn Header="Hidden / generated" Binding="{Binding Hidden}" Width="115"/>
+       </DataGrid.Columns></DataGrid>
+       <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch" Background="#3C3C40"/>
+       <TextBox x:Name="SchemaSql" Grid.Row="4" IsReadOnly="True" FontFamily="Consolas" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+      </Grid>
+     </TabItem>
+     <TabItem Header="Browse Data">
+      <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <StackPanel Margin="0,0,0,8">
+        <DockPanel Margin="0,0,0,6"><TextBlock Text="Table:" DockPanel.Dock="Left" Margin="0,0,8,0"/><ComboBox x:Name="TableSelector" DisplayMemberPath="Name" SelectionChanged="TableSelector_Changed"/></DockPanel>
+        <WrapPanel Margin="0,0,0,6"><Button Content="New record…" Click="Insert_Click"/><Button Content="Delete record" Click="Delete_Click"/><Button Content="Refresh" Click="Refresh_Click"/><Button Content="Clear filters" Click="ClearFilters_Click"/><Button Content="Import CSV…" Click="ImportCsv_Click"/><Button Content="Export CSV…" Click="ExportCsv_Click"/></WrapPanel>
+        <DockPanel><Button DockPanel.Dock="Right" Content="Apply filters" Click="Refresh_Click" Margin="6,0,0,0"/><TextBox x:Name="RowSearch" ToolTip="Search all columns. Column-header boxes filter individual columns." KeyDown="Search_KeyDown"/></DockPanel>
+        <WrapPanel Margin="0,6,0,0"><TextBlock Text="Sort by" Margin="0,0,6,0"/><ComboBox x:Name="SortColumn" Width="160" DisplayMemberPath="Name"/><CheckBox x:Name="Descending" Content="Descending" Foreground="#F4F4F6" VerticalAlignment="Center" Margin="10,0"/><Button Content="Edit cell…" Click="Edit_Click"/></WrapPanel>
+       </StackPanel>
+       <DataGrid x:Name="RowsGrid" Grid.Row="1" IsReadOnly="True" CanUserSortColumns="True" Sorting="Rows_Sorting" SelectionMode="Single" SelectionUnit="CellOrRowHeader" SelectedCellsChanged="Cell_Changed" BeginningEdit="Rows_BeginningEdit" PreparingCellForEdit="Rows_PreparingCellForEdit" CellEditEnding="Rows_CellEditEnding" PreviewMouseRightButtonDown="Rows_RightClick">
+        <DataGrid.ContextMenu><ContextMenu><MenuItem Header="Copy cell value" Click="CopyCell_Click"/><MenuItem Header="Edit cell…" Click="Edit_Click"/><MenuItem Header="Set to NULL" Click="NullCell_Click"/><Separator/><MenuItem Header="Delete record" Click="Delete_Click"/></ContextMenu></DataGrid.ContextMenu>
+       </DataGrid>
+       <WrapPanel Grid.Row="2" Margin="0,8,0,0"><Button Content="|◀" Click="First_Click"/><Button Content="◀" Click="Previous_Click"/><Button Content="▶" Click="Next_Click"/><Button Content="▶|" Click="Last_Click"/>
+        <TextBlock Text="Page" Margin="6,0"/><TextBox x:Name="GoPage" Width="45" Text="1" KeyDown="GoPage_KeyDown"/>
+        <TextBlock x:Name="PageLabel" Text="Select a table" Foreground="#9C9CA2" Margin="6,0" TextWrapping="Wrap"/>
+       </WrapPanel>
+      </Grid>
+     </TabItem>
+     <TabItem Header="Edit Pragmas">
+      <DockPanel><StackPanel DockPanel.Dock="Top" Margin="0,0,0,8"><TextBlock Text="Database properties" Foreground="#E8175D" FontSize="16"/><TextBlock Text="Only user_version and application_id are editable here. Storage and safety settings are shown read-only." Foreground="#9C9CA2" TextWrapping="Wrap" Margin="0,6"/>
+       <WrapPanel><TextBlock Text="User version" Margin="0,0,6,0"/><TextBox x:Name="UserVersion" Width="105"/><TextBlock Text="Application ID" Margin="12,0,6,0"/><TextBox x:Name="ApplicationId" Width="105"/><Button Content="Apply" Click="Pragmas_Click" Margin="8,0,0,0"/></WrapPanel></StackPanel>
+       <DataGrid x:Name="PropertiesGrid" IsReadOnly="True"><DataGrid.Columns><DataGridTextColumn Header="Pragma" Binding="{Binding Key}" Width="*"/><DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"/></DataGrid.Columns></DataGrid>
+      </DockPanel>
+     </TabItem>
+     <TabItem Header="Execute SQL">
+      <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="Auto"/><RowDefinition Height="3*"/></Grid.RowDefinitions>
+       <WrapPanel Margin="0,0,0,8"><Button Content="▶ Run SQL (F5)" Click="Sql_Click" Background="#E8175D" BorderBrush="#E8175D"/><Button Content="Run selection" Click="SqlSelection_Click"/><Button Content="Open SQL…" Click="OpenSql_Click"/><Button Content="Save SQL…" Click="SaveSql_Click"/></WrapPanel>
+       <TextBox x:Name="SqlEditor" Grid.Row="1" FontFamily="Consolas" FontSize="13" AcceptsReturn="True" AcceptsTab="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="SELECT name, type FROM sqlite_schema ORDER BY name;"/>
+       <DockPanel Grid.Row="2" Margin="0,8">
+        <TextBlock x:Name="SqlMessage" Text="Last result: up to 1,000 rows. Queries are limited to 15 seconds." Foreground="#9C9CA2" TextWrapping="Wrap"/>
+       </DockPanel>
+       <DataGrid x:Name="SqlResults" Grid.Row="3" IsReadOnly="True"/>
+      </Grid>
+     </TabItem>
+    </TabControl>
+    <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#3C3C40"/>
+    <TabControl Grid.Column="2" Margin="8,0,0,0">
+     <TabItem Header="Edit Cell">
+      <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <TextBlock x:Name="CellLocation" Text="Select a cell in Browse Data" Foreground="#9C9CA2" TextWrapping="Wrap" Margin="0,0,0,8"/>
+       <ComboBox x:Name="CellType" Grid.Row="1" SelectionChanged="CellType_Changed" Margin="0,0,0,8"><ComboBoxItem Content="NULL"/><ComboBoxItem Content="INTEGER"/><ComboBoxItem Content="REAL"/><ComboBoxItem Content="TEXT"/><ComboBoxItem Content="BLOB"/></ComboBox>
+       <TextBox x:Name="CellText" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True" FontFamily="Consolas" VerticalContentAlignment="Top" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" TextChanged="CellText_Changed"/>
+       <StackPanel Grid.Row="3" Margin="0,8,0,0"><TextBlock x:Name="CellHelp" Text="NULL, text and hex blobs remain distinct. Decimal values accept dot or comma." Foreground="#9C9CA2" TextWrapping="Wrap"/>
+        <WrapPanel Margin="0,8,0,0"><Button x:Name="ApplyCellButton" Content="Apply cell" Click="ApplyCell_Click" Background="#E8175D" BorderBrush="#E8175D" IsEnabled="False"/><Button Content="Discard" Click="DiscardCell_Click"/><Button Content="Copy" Click="CopyCell_Click"/></WrapPanel>
+       </StackPanel>
+      </Grid>
+     </TabItem>
+     <TabItem Header="Schema">
+      <DockPanel><TextBlock DockPanel.Dock="Top" Text="Database Schema" Foreground="#E8175D" FontWeight="SemiBold" Margin="0,0,0,8"/>
+       <TextBox x:Name="TableSearch" DockPanel.Dock="Top" TextChanged="TableSearch_Changed" ToolTip="Filter schema names" Margin="0,0,0,6"/>
+       <TextBlock x:Name="ObjectCount" DockPanel.Dock="Bottom" Foreground="#9C9CA2" TextWrapping="Wrap" Margin="0,6,0,0"/>
+       <ListBox x:Name="Tables" SelectionChanged="Table_Changed" DisplayMemberPath="Name" Visibility="Collapsed"/>
+       <TreeView x:Name="SchemaTree" SelectedItemChanged="SchemaTree_Changed"/>
+      </DockPanel>
+     </TabItem>
+    </TabControl>
+    <Expander Grid.Row="1" Grid.ColumnSpan="3" Header="SQL Log" Margin="0,8,0,0">
+     <DockPanel Height="125"><Button Content="Clear log" DockPanel.Dock="Right" Click="ClearSqlLog_Click" VerticalAlignment="Top" Margin="8,0,0,0"/><TextBox x:Name="SqlLog" IsReadOnly="True" FontFamily="Consolas" AcceptsReturn="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/></DockPanel>
+    </Expander>
+   </Grid>
+  </Grid>
+  <DockPanel Grid.Row="1" Margin="0,12,0,0"><Button x:Name="CancelButton" DockPanel.Dock="Right" Content="Cancel" Click="Cancel_Click" Visibility="Collapsed"/>
+   <TextBlock x:Name="Status" Text="Ready. No database loaded." Foreground="#9C9CA2" TextWrapping="Wrap"/>
+  </DockPanel>
+ </Grid>
+</UserControl>
