@@ -301,15 +301,24 @@ The result follows the receiving DB's format: `.slt` in produces an encrypted `.
 
 ### Merge after a game update
 
-1. Keep your old modded GameDB and obtain a clean GameDB for the newly installed game version.
-2. Drop the **clean updated DB into the top area**.
-3. Drop your **old modded DB into the lower merge area**.
-4. Click **Merge updated DB**, review the source names and preview, and confirm.
-5. Test the new output before using it as your active GameDB. Both original files remain available.
+Step 0 
+- [Re-download](https://github.com/HTTPJXRDN/FH6-Local-Crypto-Car-Editor-Tool/releases/tag/ForzaModToolV1.2.5) Forza Mod Tool from the 1.2.5 release, it is a **hotfix** v1.2.5.2 to fix some issues with the merge new db now that I got my hands on a new db
 
-The app matches your old modded DB's `VersionInfo.database_version` to an embedded clean reference from that same game version. It compares the old clean reference with your modded DB, then applies only your additions, edited fields and deliberate deletions onto the new clean DB. Untouched official updates, new cars and the updated version stamp are retained. This action accepts SLT or SQLite in either area and produces the top file's format.
+Step 1
+  - Drag the new `gamedbRC.slt` from `media\stripped` into the top drop zone
+  - Drag your modified `gamedbRC.slt` from `mediapc\stripped` into the **overlay** dropzone
+  - Click the `MERGE UPDATED DB` button in the overlay box
+<img width="1634" height="1270" alt="image" src="https://github.com/user-attachments/assets/a57037c8-7408-497c-873e-fd8775b6ff67" />
 
-Older clean references are kept alongside newer references, not replaced. If no unique embedded reference matches, the app asks you to choose the **unmodified full GameDB from the same version as the old modded DB**. A version stamp identifies a build but does not prove a user-supplied reference is clean. Your edits win same-field conflicts; deliberate deletions of old keys win over official edits to those keys. Keyless tables use exact-content differences and duplicate counts, so independently changed official and modded variants can coexist. See the [advanced update-merge reference](#merge-an-updated-game-database-with-your-old-modded-database) and test before installing the output.
+Step 2
+  - Click the `CREATE UPDATED DB` button
+<img width="1742" height="1192" alt="image" src="https://github.com/user-attachments/assets/0394b1e0-9f11-4fd6-ad87-96faf52e0ba5" />
+
+Step 3
+  - Rename your modded `gamedbRC.slt` to `gamedbRC.slt.bak`
+  - Rename the newly created file from `gamedbRC.updatedmerg.slt` to `gamedbRC.slt`
+  - **You're done, you can now launch the game and enjoy the new content.
+<img width="1556" height="1334" alt="image" src="https://github.com/user-attachments/assets/f782b810-2906-407c-88ef-16d9d3121f4a" />
 
 ### Crypto controls
 
