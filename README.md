@@ -73,7 +73,7 @@ The release executable supports Windows 10/11 x64 and does not require a separat
 
 ## Start here: a beginner's guide
 
-Download and extract `FH6LocalModTool_v1.2.6.zip` from the release assets, then run **Start Forza Mod Tool.cmd**. The launcher also routes .NET's initial unpacking to A: when that drive exists; direct `FH6ModStudio.exe` launch remains available. Keep `acl_compressor.exe`, `forzatech_acl.dll`, and the included `licenses` folder beside the executable. If building from source, run the resulting `FH6ModStudio.exe` instead.
+Download and extract `FH6LocalModTool_v1.2.6.zip` from the release assets, then run **FH6ModStudio.exe**. Keep `acl_compressor.exe`, `forzatech_acl.dll`, and the included `licenses` folder beside the executable. If building from source, run the resulting `FH6ModStudio.exe` instead.
 
 The tool has seven tabs:
 
@@ -846,9 +846,7 @@ Back up originals and test modified outputs in game. Successful cryptographic or
 
 ## Temporary workspace
 
-Tool-owned database, profile, garage, merge, stock-reference, and animation work prefers `A:\Forza Mod Tool Temp\Work` when A: exists. If that workspace cannot be used, the operation reports an error instead of silently filling C:. On PCs without A:, the normal per-user temporary location remains available.
-
-Use **Start Forza Mod Tool.cmd** to route .NET bundle extraction before startup too. Launching the EXE directly uses its inherited environment for that initial .NET extraction. `FORZA_MOD_TOOL_TEMP` can choose another absolute working-directory root. Child-process TEMP/TMP changes are local to the tool; Windows' system-wide settings are not changed. The thumbnail cache is an existing game cache, not a tool-created temporary folder.
+Temporary working copies use the normal Windows temporary folder (`%TEMP%`), usually on C:, under `ForzaModTool\Work`. The tool follows your existing Windows configuration.
 
 ## Troubleshooting
 
