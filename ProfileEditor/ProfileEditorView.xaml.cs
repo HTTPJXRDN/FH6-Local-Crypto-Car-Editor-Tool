@@ -104,7 +104,7 @@ public partial class ProfileEditorView : UserControl
         var container = ProfileContainer.Parse(stream);
 
         CloseConnection();
-        string dir = Path.Combine(Path.GetTempPath(), "FH6LocalCryptoTool");
+        string dir = Path.Combine(FH6LocalCryptoTool.TempWorkspace.Root, "FH6LocalCryptoTool");
         Directory.CreateDirectory(dir);
         _sqlitePath = Path.Combine(dir, $"profile.{Environment.ProcessId}.{Guid.NewGuid():N}.sqlite");
         File.WriteAllBytes(_sqlitePath, container.Database);

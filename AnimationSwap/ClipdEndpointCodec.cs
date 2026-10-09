@@ -202,7 +202,7 @@ public static class ClipdEndpointCodec
     {
         string exe = Path.Combine(AppContext.BaseDirectory, "acl_compressor.exe");
         if (!File.Exists(exe)) throw new FileNotFoundException("Bundled ACL compressor is missing.", exe);
-        string parent = Path.Combine(Path.GetTempPath(), "FH6LocalCryptoTool", "acl-edits");
+        string parent = Path.Combine(FH6LocalCryptoTool.TempWorkspace.Root, "FH6LocalCryptoTool", "acl-edits");
         string work = Path.Combine(parent, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
         try

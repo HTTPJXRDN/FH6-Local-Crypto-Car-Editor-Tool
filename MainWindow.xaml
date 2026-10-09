@@ -4,8 +4,10 @@
         xmlns:ce="clr-namespace:FH6CarEditor"
         xmlns:pe="clr-namespace:FH6ProfileEditor"
         xmlns:anim="clr-namespace:FH6AnimationSwap"
+        xmlns:browser="clr-namespace:FH6LocalCryptoTool.DbBrowser"
+        xmlns:garage="clr-namespace:FH6LocalCryptoTool.GarageViewer"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="FH6 Local Mod Tool" Height="840" Width="1080"
+        Title="Forza Mod Tool" Height="840" Width="1080"
         MinHeight="520" MinWidth="560"
         Background="#FF1D1D1F"
         Icon="/Assets/ICO/dbtool_icon.ico"
@@ -434,7 +436,7 @@
 
         <Border Grid.Row="0" Height="34" Background="#FF161618">
           <Grid>
-            <TextBlock Text="FH6 Local Mod Tool" Foreground="{StaticResource Dim}"
+            <TextBlock Text="Forza Mod Tool" Foreground="{StaticResource Dim}"
                        FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" Margin="16,0,0,0"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
               <Button Style="{StaticResource CaptionButton}" Content="&#xE921;"
@@ -450,7 +452,7 @@
 
     <TabControl Grid.Row="2" Background="{StaticResource AppGrad}" BorderThickness="0">
       <TabItem Header="Crypto">
-    <Grid Margin="24,18,24,16">
+    <Grid x:Name="CryptoWorkspace" Margin="24,18,24,16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -473,9 +475,9 @@
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" VerticalAlignment="Center">
                 <TextBlock FontSize="22" FontWeight="Bold">
-                    <Run Text="Local" Foreground="{StaticResource Pink}"/><Run Text=" Crypto Tool"/>
+                    <Run Text="Forza" Foreground="{StaticResource Pink}"/><Run Text=" Crypto"/>
                 </TextBlock>
-                <TextBlock Text="Drag a file onto a zone below. No commands needed."
+                <TextBlock Text="Drag a file onto the zone below."
                            Foreground="{StaticResource Dim}" FontSize="12" Margin="0,3,0,0"/>
             </StackPanel>
             <Image Grid.Column="1" Source="/Assets/Logo/FMLogo_trim.png" Height="46"
@@ -503,36 +505,36 @@
                     <Image Source="/Assets/Logo/dbtool_icon.png" Width="42" Height="42"
                            HorizontalAlignment="Center" Stretch="Uniform"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
-                    <TextBlock x:Name="DropTitle" Text="Drop a file here" FontSize="18" FontWeight="Bold"
+                    <TextBlock x:Name="DropTitle" Text="Drop a FH6 or FM8 file here" FontSize="18" FontWeight="Bold"
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,5,0,0">
                         <Ellipse Width="5" Height="5" Fill="{StaticResource Pink}" VerticalAlignment="Center" Margin="0,0,7,0"/>
                         <TextBlock Foreground="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center">
-                            <Run Text=".slt" Foreground="{StaticResource Ink}"/><Run Text="  →  decrypt to .sqlite"/>
+                            <Run Text=".slt ↔ .sqlite" Foreground="{StaticResource Ink}"/><Run Text="  —  GameDB decrypt / re-encrypt"/>
                         </TextBlock>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,0">
                         <Ellipse Width="5" Height="5" Fill="{StaticResource Pink}" VerticalAlignment="Center" Margin="0,0,7,0"/>
                         <TextBlock Foreground="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center">
-                            <Run Text=".sqlite" Foreground="{StaticResource Ink}"/><Run Text="  →  re-encrypt to .slt (uses the template below)"/>
+                            <Run Text=".zip" Foreground="{StaticResource Ink}"/><Run Text="  →  extract → Re-encrypt to repack"/>
                         </TextBlock>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,0">
                         <Ellipse Width="5" Height="5" Fill="{StaticResource Pink}" VerticalAlignment="Center" Margin="0,0,7,0"/>
                         <TextBlock Foreground="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center">
-                            <Run Text=".zip" Foreground="{StaticResource Ink}"/><Run Text="  →  decrypt and extract (General key)"/>
+                            <Run Text="asset" Foreground="{StaticResource Ink}"/><Run Text="  ↔  decrypt/re-encrypt ini, txt, JSON,"/>
                         </TextBlock>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,0">
                         <Ellipse Width="5" Height="5" Fill="{StaticResource Pink}" VerticalAlignment="Center" Margin="0,0,7,0"/>
                         <TextBlock Foreground="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center">
-                            <Run Text="asset" Foreground="{StaticResource Ink}"/><Run Text="  ↔  decrypt/re-encrypt text assets — .ini, AnimResourceConfig… (General key)"/>
+                            <Run Text=".skeld" Foreground="{StaticResource Ink}"/><Run Text="  ↔  decode/rebuild skeleton JSON"/>
                         </TextBlock>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,0">
                         <Ellipse Width="5" Height="5" Fill="{StaticResource Pink}" VerticalAlignment="Center" Margin="0,0,7,0"/>
                         <TextBlock Foreground="{StaticResource Dim}" FontSize="12.5" VerticalAlignment="Center">
-                            <Run Text=".skeld" Foreground="{StaticResource Ink}"/><Run Text="  ↔  decode/rebuild skeleton JSON (no encryption key)"/>
+                            <Run Text="C_ProfileData" Foreground="{StaticResource Ink}"/><Run Text="  ↔  .sqlite — FH6 save database export / re-encrypt"/>
                         </TextBlock>
                     </StackPanel>
                     <TextBlock x:Name="StagedText" Visibility="Collapsed" HorizontalAlignment="Center"
@@ -551,7 +553,8 @@
         </Border>
 
         <!-- ===== Template row ===== -->
-        <Grid Grid.Row="2" Margin="0,18,0,0">
+        <StackPanel Grid.Row="2" Margin="0,18,0,0">
+        <Grid x:Name="DbTemplateRow">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="112"/>
                 <ColumnDefinition Width="*"/>
@@ -565,6 +568,15 @@
             </Border>
             <Button Grid.Column="2" Content="Browse…" Style="{StaticResource PinkButton}" Click="BrowseTemplate_Click"/>
         </Grid>
+        <Grid x:Name="ProfileTemplateRow" Visibility="Collapsed">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="112"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="Profile template:" VerticalAlignment="Center" Foreground="{StaticResource Dim}" FontSize="13.5"/>
+            <Border Grid.Column="1" Background="#FF202023" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Margin="0,0,12,0" Padding="12,9" Height="38">
+                <TextBlock x:Name="ProfileTemplateText" Text="(auto: the last encrypted FH6 C_ProfileData you decrypted)" Foreground="{StaticResource Dim}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+            </Border>
+            <Button Grid.Column="2" Content="Browse…" Style="{StaticResource PinkButton}" Click="BrowseProfileTemplate_Click"/>
+        </Grid>
+        </StackPanel>
 
         <!-- ===== Output folder row ===== -->
         <Grid Grid.Row="3" Margin="0,10,0,0">
@@ -584,17 +596,9 @@
             <Button Grid.Column="3" Content="Browse…" Style="{StaticResource PinkButton}" Click="BrowseOutput_Click"/>
         </Grid>
 
-        <!-- ===== Key + option row ===== -->
+        <!-- ===== Output option ===== -->
         <Grid Grid.Row="4" Margin="0,14,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Key:" VerticalAlignment="Center" Foreground="{StaticResource Dim}" Margin="0,0,10,0" FontSize="13.5"/>
-            <ComboBox x:Name="KeyCombo" Grid.Column="1" Width="170" VerticalAlignment="Center"/>
-            <CheckBox x:Name="OpenFolderCheck" Grid.Column="3" Content="Open folder when done"
+            <CheckBox x:Name="OpenFolderCheck" HorizontalAlignment="Right" Content="Open folder when done"
                       FontSize="13.5" VerticalAlignment="Center" IsChecked="True"/>
         </Grid>
 
@@ -686,6 +690,9 @@
                 </Viewbox>
                 <TextBlock x:Name="StatusText" Text="Ready." Foreground="{StaticResource Dim}"
                            VerticalAlignment="Center" FontSize="13.5"/>
+                <ProgressBar x:Name="CryptoBusyIndicator" Width="110" Height="5" Margin="14,0,0,0"
+                             IsIndeterminate="True" Visibility="Collapsed" VerticalAlignment="Center"
+                             Foreground="{StaticResource Pink}"/>
             </StackPanel>
         </Border>
     </Grid>
@@ -735,8 +742,14 @@
       <TabItem Header="Profile Editor">
         <pe:ProfileEditorView/>
       </TabItem>
+      <TabItem Header="Garage Viewer">
+        <garage:GarageViewerView/>
+      </TabItem>
+            <TabItem Header="DB Browser">
+                <browser:DbBrowserView/>
+            </TabItem>
     </TabControl>
-        <TextBlock Grid.Row="2" Panel.ZIndex="20" Text="V1.2.4"
+        <TextBlock Grid.Row="2" Panel.ZIndex="20" Text="V1.2.6"
                    HorizontalAlignment="Right" VerticalAlignment="Top"
                    Margin="0,10,15,0" Foreground="{StaticResource Faint}"
                    FontSize="10.5" FontWeight="SemiBold" IsHitTestVisible="False"/>

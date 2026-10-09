@@ -11,7 +11,7 @@ public sealed partial class BrowserDatabase
 {
     public static BrowserDatabase New()
     {
-        string path = Path.Combine(Path.GetTempPath(), "fh6_db_browser_" + Guid.NewGuid().ToString("N") + ".sqlite");
+        string path = Path.Combine(FH6LocalCryptoTool.TempWorkspace.Root, "fh6_db_browser_" + Guid.NewGuid().ToString("N") + ".sqlite");
         var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
         try { db.Open(); using var cmd = db.CreateCommand(); cmd.CommandText = "PRAGMA user_version=0"; cmd.ExecuteNonQuery(); return new BrowserDatabase(path + ".unsaved", path, null, db); }
         catch { db.Dispose(); DeleteOwned(path); DeleteOwned(path + ".checkpoint"); throw; }

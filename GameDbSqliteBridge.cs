@@ -12,7 +12,7 @@ namespace FH6LocalCryptoTool;
 /// </summary>
 public static class GameDbSqliteBridge
 {
-    private const string TempPrefix = "fh6_mod_studio_slt_";
+    private const string TempPrefix = "forza_mod_studio_slt_";
     public static bool IsSlt(string path) =>
         Path.GetExtension(path).Equals(".slt", StringComparison.OrdinalIgnoreCase);
 
@@ -22,13 +22,16 @@ public static class GameDbSqliteBridge
         public string SqlitePath { get; }
         public string? TemplateSlt { get; }
         public string? SourceHash { get; }
+        public GameDbContainerFormat.Kind Format { get; }
 
-        internal MaterializedDatabase(string path, string? templateSlt, bool ownsFile, string? sourceHash = null)
+        internal MaterializedDatabase(string path, string? templateSlt, bool ownsFile, string? sourceHash = null,
+            GameDbContainerFormat.Kind format = GameDbContainerFormat.Kind.Sqlite)
         {
             SqlitePath = path;
             TemplateSlt = templateSlt;
             _ownsFile = ownsFile;
             SourceHash = sourceHash;
+            Format = format;
         }
 
         public void VerifySourceUnchanged()
@@ -45,28 +48,44 @@ public static class GameDbSqliteBridge
         }
     }
 
-    public static MaterializedDatabase Materialize(string inputPath)
+    public static MaterializedDatabase Materialize(string inputPath, bool allowMotorsport = false)
     {
         inputPath = Path.GetFullPath(inputPath);
         if (!File.Exists(inputPath)) throw new FileNotFoundException("Database not found.", inputPath);
-        if (!IsSlt(inputPath))
-        {
-            if (!LooksLikeSqliteFile(inputPath))
-                throw new InvalidDataException("Choose a decrypted SQLite database or an encrypted GameDB .slt.");
+        // A magic string alone is not a SQLite database. This also permits a
+        // genuine plaintext database named .slt without treating it as encrypted.
+        if (IsSqliteDatabase(inputPath))
             return new MaterializedDatabase(inputPath, null, false);
+        if (!IsSlt(inputPath) && GameDbContainerFormat.Detect(inputPath) is not
+            (GameDbContainerFormat.Kind.Fh6Aes36 or GameDbContainerFormat.Kind.ForzaMotorsportTransformIt32))
+        {
+            throw new InvalidDataException("Choose a valid decrypted SQLite database or an encrypted GameDB .slt.");
         }
 
-        string temp = Path.Combine(Path.GetTempPath(), TempPrefix + Guid.NewGuid().ToString("N") + ".sqlite");
+        string temp = Path.Combine(FH6LocalCryptoTool.TempWorkspace.Root, TempPrefix + Guid.NewGuid().ToString("N") + ".sqlite");
         try
         {
             byte[] encrypted = File.ReadAllBytes(inputPath);
             string hash = Convert.ToHexString(SHA256.HashData(encrypted));
-            byte[] sqlite = GameDb.Decrypt(encrypted, Fh6Keys.Get("GameDB").DataKey);
+            var format = GameDbContainerFormat.Detect(encrypted);
+            if (format == GameDbContainerFormat.Kind.ForzaMotorsportTransformIt32 && !allowMotorsport)
+                throw new NotSupportedException("Use the Crypto tab to decrypt Motorsport .slt files, then open the SQLite separately. Motorsport editor/merge integration is not enabled.");
+            byte[] sqlite = format switch
+            {
+                GameDbContainerFormat.Kind.Fh6Aes36 =>
+                    GameDb.Decrypt(encrypted, Fh6Keys.Get("GameDB").DataKey),
+                GameDbContainerFormat.Kind.ForzaMotorsportTransformIt32 =>
+                    MotorsportGameDb.Decrypt(encrypted),
+                _ => throw new InvalidDataException(
+                    "The .slt layout is not a recognized Forza GameDB container.")
+            };
             if (!GameDb.LooksLikeSqlite(sqlite))
-                throw new InvalidDataException("The .slt did not decrypt to a SQLite GameDB. Check the file and game version.");
+                throw new InvalidDataException(
+                    $"The {GameDbContainerFormat.DisplayName(format)} did not decrypt to SQLite. " +
+                    "The key or game build is not supported.");
             File.WriteAllBytes(temp, sqlite);
             CheckSqlite(temp);
-            return new MaterializedDatabase(temp, inputPath, true, hash);
+            return new MaterializedDatabase(temp, inputPath, true, hash, format);
         }
         catch
         {
@@ -83,7 +102,7 @@ public static class GameDbSqliteBridge
             throw new InvalidOperationException("The original .slt changed after it was loaded. Reload it before exporting or merging.");
     }
 
-    public static void EncryptSnapshot(string sqlitePath, string templateSlt, string outputSlt)
+    public static void EncryptSnapshot(string sqlitePath, string templateSlt, string outputSlt, bool allowMotorsport = false)
     {
         sqlitePath = Path.GetFullPath(sqlitePath);
         templateSlt = Path.GetFullPath(templateSlt);
@@ -99,10 +118,22 @@ public static class GameDbSqliteBridge
 
         byte[] sqlite = File.ReadAllBytes(sqlitePath);
         byte[] template = File.ReadAllBytes(templateSlt);
-        if (!GameDb.LooksLikeSqlite(GameDb.Decrypt(template, Fh6Keys.Get("GameDB").DataKey)))
-            throw new InvalidDataException("The selected .slt template is not a readable GameDB.");
-        byte[] encrypted = GameDb.Encrypt(sqlite, template, Fh6Keys.Get("GameDB").DataKey);
-        byte[] roundTrip = GameDb.Decrypt(encrypted, Fh6Keys.Get("GameDB").DataKey);
+        // Validate the entire decrypted template, not its outer magic string.
+        // Both FH6 and FM go through the same payload/integrity validation.
+        using var validatedTemplate = Materialize(templateSlt, allowMotorsport);
+        var format = validatedTemplate.Format;
+        if (format != GameDbContainerFormat.Kind.Fh6Aes36 && format != GameDbContainerFormat.Kind.ForzaMotorsportTransformIt32)
+            throw new InvalidDataException("The selected .slt template is not a recognized encrypted GameDB.");
+        bool motorsport = format == GameDbContainerFormat.Kind.ForzaMotorsportTransformIt32;
+        if (motorsport && !allowMotorsport)
+            throw new NotSupportedException("Use the Crypto tab for Motorsport re-encryption. Motorsport editor/merge integration is not enabled.");
+        validatedTemplate.VerifySourceUnchanged();
+        if (validatedTemplate.SourceHash != Convert.ToHexString(SHA256.HashData(template)))
+            throw new InvalidOperationException("The selected .slt template changed during validation. Reload it before exporting.");
+        byte[] encrypted = motorsport ? MotorsportGameDb.Encrypt(sqlite, template)
+            : GameDb.Encrypt(sqlite, template, Fh6Keys.Get("GameDB").DataKey);
+        byte[] roundTrip = motorsport ? MotorsportGameDb.Decrypt(encrypted)
+            : GameDb.Decrypt(encrypted, Fh6Keys.Get("GameDB").DataKey);
         if (roundTrip.Length < sqlite.Length || !roundTrip.AsSpan(0, sqlite.Length).SequenceEqual(sqlite))
             throw new InvalidDataException("Encrypted output did not reproduce the edited SQLite database.");
 
@@ -115,6 +146,26 @@ public static class GameDbSqliteBridge
         finally
         {
             try { File.Delete(partial); } catch { }
+        }
+    }
+
+    public static GameDbContainerFormat.Kind DetectFormat(string path)
+    {
+        using var database = Materialize(path, allowMotorsport: true);
+        return database.Format;
+    }
+
+    public static bool IsSqliteDatabase(string path)
+    {
+        try
+        {
+            if (!LooksLikeSqliteFile(path)) return false;
+            CheckSqlite(path);
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or SqliteException or InvalidDataException)
+        {
+            return false;
         }
     }
 
@@ -137,7 +188,8 @@ public static class GameDbSqliteBridge
         db.Open();
         using var cmd = db.CreateCommand();
         cmd.CommandText = "PRAGMA quick_check";
-        if (!string.Equals(Convert.ToString(cmd.ExecuteScalar()), "ok", StringComparison.OrdinalIgnoreCase))
+        using var result = cmd.ExecuteReader();
+        if (!result.Read() || !string.Equals(result.GetString(0), "ok", StringComparison.OrdinalIgnoreCase) || result.Read())
             throw new InvalidDataException("SQLite integrity check failed.");
     }
 }

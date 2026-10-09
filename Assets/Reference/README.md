@@ -1,5 +1,7 @@
 # Versioned clean GameDB references
 
+The verified October FH6 update is also embedded as `gamedbRC.stock.661353983.sqlite.gz`: 682 drivable models, build stamp `661353983`. It matches the previously inspected official update across all 207 tables. Garage Viewer defaults explicitly to this catalog; version stamps must never be sorted to guess the newest build. The original 671-model reference remains intact for older modded DB comparisons and update merges.
+
 Keep the original `gamedbRC.stock.sqlite.gz` when adding a future update's clean baseline. The current verified reference has `VersionInfo.database_version = -1107070983`. This is an opaque database-build identifier, not the app's version or a sortable game version.
 
 For a future verified, unmodified full GameDB, add a gzip-compressed SQLite file named `gamedbRC.stock.<build-label>.sqlite.gz` in this folder. The project embeds these files automatically. Do not include modified databases, single-car exports, duplicate references with the same stamp, or fabricated future versions. The catalog selects by the stamp inside the database, not the filename. More than two historical versions can be retained.

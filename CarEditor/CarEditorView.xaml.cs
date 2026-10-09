@@ -315,6 +315,12 @@ public partial class CarEditorView : UserControl
     }
 
     // ============================================================ UI events
+    void EngineListResize_DragDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
+    {
+        EngineListRow.Height = new GridLength(Math.Clamp(EngineListRow.ActualHeight + e.VerticalChange, 80, 1600));
+        e.Handled = true;
+    }
+
     void CarSearch_Changed(object s, TextChangedEventArgs e)
     {
         CarSearchPh.Visibility = string.IsNullOrEmpty(CarSearch.Text) ? Visibility.Visible : Visibility.Collapsed;
@@ -1008,7 +1014,7 @@ public partial class CarEditorView : UserControl
         }
     }
 
-    static string NewWorkingPath() => Path.Combine(Path.GetTempPath(),
+    static string NewWorkingPath() => Path.Combine(FH6LocalCryptoTool.TempWorkspace.Root,
         $"fh6_mod_studio_car_editor_{Environment.ProcessId}_{Guid.NewGuid():N}.sqlite");
 
     static string CreateDatabaseSnapshot(string sourcePath, string destinationPath)
@@ -1050,7 +1056,7 @@ public partial class CarEditorView : UserControl
         try { fullPath = Path.GetFullPath(path); }
         catch { return; }
 
-        string tempRoot = Path.GetFullPath(Path.GetTempPath());
+        string tempRoot = Path.GetFullPath(FH6LocalCryptoTool.TempWorkspace.Root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         string fileName = Path.GetFileName(fullPath);
         bool owned = fullPath.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase) &&
                      (fileName.StartsWith("fh6_mod_studio_car_editor_", StringComparison.OrdinalIgnoreCase) ||
@@ -1103,7 +1109,7 @@ public partial class CarEditorView : UserControl
         OptAutoshow.IsChecked = false;
         OptAutoshow.IsEnabled = false;
         OptRWD.IsChecked = OptFWD.IsChecked = OptManual.IsChecked = false;
-        OptWhite.IsChecked = OptFeTires.IsChecked = OptLift.IsChecked = false;
+        OptWhite.IsChecked = OptFeTires.IsChecked = OptLift.IsChecked = OptRaceSuspensionLimit.IsChecked = false;
         OptSlam.IsChecked = true;
         DriftSteeringAngle.Text = "50.0";
         AddBodyKitBtn.IsEnabled = RemoveBodyKitBtn.IsEnabled = RestoreCarBtn.IsEnabled = ApplyPowerBtn.IsEnabled = false;
@@ -1449,7 +1455,7 @@ public partial class CarEditorView : UserControl
                            "Queued fitment is written lowest to highest.\n" +
                            "Existing choices are skipped; unchanged Apply adds nothing.\n" +
                            "Batch: rims, tire width/profile, track width,\n" +
-                           "Drift/Rally suspension, drivetrain and tires.\n" +
+                           "Race/Drift/Rally suspension, drivetrain and tires.\n" +
                            "Fitment applies to each car's stock body.\n" +
                            "Bodykit creation/targets are disabled.";
             Log($"batch selection: {selected.Count} cars (primary: {c.Media})", "info");
@@ -3552,7 +3558,9 @@ public partial class CarEditorView : UserControl
 
             if (OptLift.IsChecked == true) ApplyLiftKit(carId);
 
-            if (OptSlam.IsChecked == true) ApplySlamKit(carId, driftSteeringAngle);
+            if (OptRaceSuspensionLimit.IsChecked == true) ApplySuspensionLimitRemoval(carId, 3);
+
+            if (OptSlam.IsChecked == true) ApplySuspensionLimitRemoval(carId, 5, driftSteeringAngle);
 
             MarkModified(carId);
             RefreshCar();
@@ -3978,22 +3986,27 @@ public partial class CarEditorView : UserControl
         Log($"✓ lift kit: Rally max ride height front {frontLift:0.####} · rear {rearLift:0.####}", "ok");
     }
 
-    void ApplySlamKit(long carId, double steeringAngle)
+    void ApplySuspensionLimitRemoval(long carId, int level, double? steeringAngle = null)
     {
-        if (!EnsureSuspensionUpgrade(carId, 5)) return;
-        var drift = Query(@"SELECT Id,FrontSpringDamperPhysicsID f,RearSpringDamperPhysicsID r
+        string label = level switch { 3 => "Race", 5 => "Drift", _ => throw new ArgumentOutOfRangeException(nameof(level)) };
+        if (!EnsureSuspensionUpgrade(carId, level)) return;
+        var suspension = Query(@"SELECT Id,FrontSpringDamperPhysicsID f,RearSpringDamperPhysicsID r
                             FROM List_UpgradeSpringDamper
-                            WHERE Ordinal=? AND Level=5 AND IsStock=0
-                            ORDER BY Id LIMIT 1", carId).FirstOrDefault();
-        if (drift == null) { Log("slam skipped: Drift suspension row is missing", "warn"); return; }
+                            WHERE Ordinal=? AND Level=? AND IsStock=0
+                            ORDER BY Id LIMIT 1", carId, level).FirstOrDefault();
+        if (suspension == null) { Log($"remove suspension limit skipped: {label} suspension row is missing", "warn"); return; }
         int changed = Exec(@"UPDATE List_SpringDamperPhysics
                              SET MinRideHeight=0.01,MaxCompressHeight=0.005
-                             WHERE SpringDamperPhysicsID IN (?,?)", drift["f"], drift["r"]);
-        Exec("UPDATE List_UpgradeSpringDamper SET SteerMaxAngle=?,SteerMaxAngleFiltered=? WHERE Id=?",
-             steeringAngle, steeringAngle, drift["Id"]);
+                             WHERE SpringDamperPhysicsID IN (?,?)", suspension["f"], suspension["r"]);
+        // Race changes only the height/compression limits. Steering input is
+        // deliberately confined to Drift, even if a caller supplies an angle.
+        if (level == 5 && steeringAngle.HasValue)
+            Exec("UPDATE List_UpgradeSpringDamper SET SteerMaxAngle=?,SteerMaxAngleFiltered=? WHERE Id=?",
+                 steeringAngle.Value, steeringAngle.Value, suspension["Id"]);
+        string steering = level == 5 && steeringAngle.HasValue ? $" · steering angle {steeringAngle.Value:0.##}°" : "";
         Log(changed == 2
-            ? $"✓ slammed (Drift suspension lowered · steering angle {steeringAngle:0.##}°)"
-            : $"slam incomplete: updated {changed} physics row(s) · steering angle {steeringAngle:0.##}°",
+            ? $"✓ removed suspension limit ({label} suspension lowered{steering})"
+            : $"remove suspension limit incomplete ({label}): updated {changed} physics row(s){steering}",
             changed == 2 ? "ok" : "warn");
     }
 

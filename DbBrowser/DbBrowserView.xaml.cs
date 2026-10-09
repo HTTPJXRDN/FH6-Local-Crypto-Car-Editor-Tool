@@ -1,4 +1,5 @@
 using System.Data;
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -200,7 +201,8 @@ public partial class DbBrowserView : UserControl
     }
     async void Insert_Click(object sender, RoutedEventArgs e)
     {
-        if (Selected == null || _database == null || _page?.Editable != true) { Status.Text = "Select an editable table first."; return; }
+        if (_busy || !CommitInlineEdit()) return;
+        if (Selected == null || _database == null || _page?.Editable != true || _pageObject?.Name != Selected.Name) { Status.Text = "Select an editable table first."; return; }
         var obj = Selected; var entries = _page.Columns.Where(c => c.Hidden == 0).Select(c => ValueEntry.For(c, new BrowserValue("DEFAULT", ""))).ToList();
         var editor = new BrowserValueWindow("New record • " + obj.Name, entries, true, Resources) { Owner = OwnerWindow };
         if (editor.ShowDialog() != true) return;
@@ -208,9 +210,24 @@ public partial class DbBrowserView : UserControl
     }
     async void Delete_Click(object sender, RoutedEventArgs e)
     {
-        var current = CurrentCell(); if (current == null || _database == null) return;
-        var (obj, row, _) = current.Value;
-        if (!Confirm("Delete the selected record from " + obj.Name + "? Foreign keys are not enforced, so related rows will not be removed automatically. Revert changes can undo this before committing.")) return;
+        await DeleteSelectedRecord(Confirm);
+    }
+    (BrowserObject Obj, BrowserRow Row)? CurrentRecord()
+    {
+        if (_page?.Editable != true || Selected == null || _pageObject?.Name != Selected.Name) { Status.Text = "Select an editable table first. Views and tables without a safe key are read-only here."; return null; }
+        // A row-header selection need not have a current column. Use the actual
+        // selection, never a stale CurrentCell left behind after deselection.
+        object? item = RowsGrid.SelectedItem ?? RowsGrid.SelectedCells.FirstOrDefault().Item;
+        int index = item == null ? -1 : RowsGrid.Items.IndexOf(item);
+        if (index < 0 || index >= _page.Rows.Count) { Status.Text = "Select a record or data cell first."; return null; }
+        return (Selected, _page.Rows[index]);
+    }
+    async Task DeleteSelectedRecord(Func<string, bool> confirm)
+    {
+        if (_busy || !CommitInlineEdit()) return;
+        var current = CurrentRecord(); if (current == null || _database == null) return;
+        var (obj, row) = current.Value;
+        if (!confirm("Delete the selected record from " + obj.Name + "? Foreign keys are not enforced, so related rows will not be removed automatically. Revert changes can undo this before committing.")) return;
         await Run("Deleting record…", async token => { await Task.Run(() => _database.Delete(obj, row)); await LoadPage(token); Status.Text = "Record deleted from the working copy."; });
     }
     async void Sql_Click(object sender, RoutedEventArgs e)
@@ -265,15 +282,40 @@ public partial class DbBrowserView : UserControl
     void Cancel_Click(object sender, RoutedEventArgs e) { _cancel?.Cancel(); Status.Text = "Cancellation requested…"; }
 }
 
-public sealed class ValueEntry
+public sealed class ValueEntry : INotifyPropertyChanged
 {
+    string _kind = "TEXT", _text = "", _inferredKind = "TEXT";
+    public event PropertyChangedEventHandler? PropertyChanged;
     public string Name { get; init; } = "";
     public string Declared { get; init; } = "";
-    public string Kind { get; set; } = "TEXT";
-    public string Text { get; set; } = "";
+    public string Kind
+    {
+        get => _kind;
+        set {
+            if (_kind == value) return;
+            _kind = value;
+            // An explicit DEFAULT/NULL choice must not retain an ignored draft.
+            if (value is "DEFAULT" or "NULL") { _text = ""; PropertyChanged?.Invoke(this, new(nameof(Text))); }
+            PropertyChanged?.Invoke(this, new(nameof(Kind)));
+            PropertyChanged?.Invoke(this, new(nameof(Value)));
+        }
+    }
+    public string Text
+    {
+        get => _text;
+        set {
+            if (_text == value) return;
+            _text = value;
+            // Untouched fields keep DEFAULT; typing a value makes it an actual
+            // parameter using the column's affinity, without a separate click.
+            if (value.Length > 0 && _kind is "DEFAULT" or "NULL") Kind = _inferredKind;
+            PropertyChanged?.Invoke(this, new(nameof(Text)));
+            PropertyChanged?.Invoke(this, new(nameof(Value)));
+        }
+    }
     public BrowserValue Value => new(Kind, Text);
     public static ValueEntry For(BrowserColumn column, BrowserValue value) => new() {
-        Name = column.Name, Declared = column.Type + (column.NotNull ? " • NOT NULL" : "") + (column.Default != null ? " • default " + column.Default : ""), Kind = value.Kind, Text = value.Text
+        Name = column.Name, Declared = column.Type + (column.NotNull ? " • NOT NULL" : "") + (column.Default != null ? " • default " + column.Default : ""), _inferredKind = BrowserValue.Inline(column, DBNull.Value, "").Kind, Kind = value.Kind, Text = value.Text
     };
 }
 
@@ -287,7 +329,7 @@ sealed class BrowserValueWindow : Window
         var layout = new DockPanel { Margin = new Thickness(16) }; Content = layout;
         var heading = new TextBlock { Text = title, FontSize = 18, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(232,23,93)), Margin = new Thickness(0,0,0,10) };
         DockPanel.SetDock(heading, Dock.Top); layout.Children.Add(heading);
-        var help = new TextBlock { Text = "Choose the SQLite storage type explicitly. NULL is not the text ‘NULL’. BLOB values use hex bytes. Numbers accept dot or comma. DEFAULT omits a new column so SQLite supplies its default.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,0,0,10), Foreground = Brushes.LightGray };
+        var help = new TextBlock { Text = "Typing a value selects its column's storage type automatically; you can change the type manually. Untouched DEFAULT fields use SQLite defaults. Choosing DEFAULT or NULL clears the value. NULL is not the text ‘NULL’. BLOB values use hex bytes. Numbers accept dot or comma.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,0,0,10), Foreground = Brushes.LightGray };
         DockPanel.SetDock(help, Dock.Top); layout.Children.Add(help);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0,10,0,0) };
         var cancel = new Button { Content = "Cancel", IsCancel = true }; actions.Children.Add(cancel);
@@ -295,9 +337,9 @@ sealed class BrowserValueWindow : Window
         DockPanel.SetDock(actions, Dock.Bottom); layout.Children.Add(actions);
         var grid = new DataGrid { AutoGenerateColumns = false, CanUserAddRows = false, CanUserDeleteRows = false, RowHeight = double.NaN, ItemsSource = entries };
         grid.Columns.Add(new DataGridTextColumn { Header = "Column / declared type", Binding = new Binding("Name"), IsReadOnly = true, Width = 190 });
-        grid.Columns.Add(new DataGridComboBoxColumn { Header = "Storage type", ItemsSource = inserting ? new[] { "DEFAULT", "NULL", "INTEGER", "REAL", "TEXT", "BLOB" } : ["NULL", "INTEGER", "REAL", "TEXT", "BLOB"], SelectedItemBinding = new Binding("Kind") { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged }, Width = 120 });
+        grid.Columns.Add(new DataGridComboBoxColumn { Header = "Storage type", ItemsSource = inserting ? new[] { "DEFAULT", "NULL", "INTEGER", "REAL", "TEXT", "BLOB" } : ["NULL", "INTEGER", "REAL", "TEXT", "BLOB"], SelectedItemBinding = new Binding("Kind") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged }, Width = 120 });
         var textEditor = new FrameworkElementFactory(typeof(TextBox));
-        textEditor.SetBinding(TextBox.TextProperty, new Binding("Text") { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
+        textEditor.SetBinding(TextBox.TextProperty, new Binding("Text") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged });
         textEditor.SetValue(TextBox.AcceptsReturnProperty, true); textEditor.SetValue(TextBox.TextWrappingProperty, TextWrapping.Wrap);
         textEditor.SetValue(TextBox.MinHeightProperty, 60.0); textEditor.SetValue(TextBox.MaxHeightProperty, 180.0);
         textEditor.SetValue(TextBox.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);

@@ -589,16 +589,34 @@
 
     <!-- ===================== BODY ===================== -->
     <Grid Grid.Row="1" Margin="18">
-      <!-- Proportional columns so the center never collapses on a narrow / RDP window.
-           MaxWidth caps the side cards on big monitors; MinWidth keeps them usable when tight. -->
+      <!-- Drag the dividers to resize the car picker, options, and activity panels. -->
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="1.25*" MinWidth="150" MaxWidth="360"/>
-        <ColumnDefinition Width="2*" MinWidth="200"/>
-        <ColumnDefinition Width="1.35*" MinWidth="150" MaxWidth="380"/>
+        <ColumnDefinition x:Name="CarPickerColumn" Width="1.25*" MinWidth="150"/>
+        <ColumnDefinition Width="6"/>
+        <ColumnDefinition x:Name="CarOptionsColumn" Width="2*" MinWidth="200"/>
+        <ColumnDefinition Width="6"/>
+        <ColumnDefinition x:Name="ActivityColumn" Width="1.35*" MinWidth="150"/>
       </Grid.ColumnDefinitions>
+      <Grid.Resources>
+        <Style x:Key="PanelResizeHandle" TargetType="GridSplitter">
+          <Setter Property="Background" Value="{StaticResource Line}"/>
+          <Setter Property="HorizontalAlignment" Value="Stretch"/>
+          <Setter Property="VerticalAlignment" Value="Stretch"/>
+          <Setter Property="ResizeDirection" Value="Columns"/>
+          <Setter Property="ResizeBehavior" Value="PreviousAndNext"/>
+          <Setter Property="Cursor" Value="SizeWE"/>
+          <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource Pink}"/></Trigger>
+          </Style.Triggers>
+        </Style>
+      </Grid.Resources>
+      <GridSplitter x:Name="CarPickerSplitter" Grid.Column="1" Style="{StaticResource PanelResizeHandle}"
+                    ToolTip="Drag to resize the car list and options"/>
+      <GridSplitter x:Name="ActivitySplitter" Grid.Column="3" Style="{StaticResource PanelResizeHandle}"
+                    ToolTip="Drag to resize the options and activity log"/>
 
       <!-- ===== LEFT: pick a car ===== -->
-      <Border Grid.Column="0" Style="{StaticResource CardBorder}" Margin="0,0,16,0">
+      <Border Grid.Column="0" Style="{StaticResource CardBorder}" Margin="0,0,8,0">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -691,7 +709,7 @@
       </Border>
 
       <!-- ===== CENTER: option cards ===== -->
-      <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="0,0,16,0">
+      <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Margin="8,0,8,0">
         <StackPanel>
 
           <!-- ENGINE (full width) -->
@@ -720,7 +738,26 @@
                   <CheckBox x:Name="HideUsed" Content="hide already-added" Margin="14,0,0,0"
                             VerticalAlignment="Center" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
                 </StackPanel>
-                <ListBox x:Name="EngList" Style="{StaticResource DarkList}" Height="150" Margin="0,8,0,0"/>
+                <Grid Margin="0,8,0,0">
+                  <Grid.RowDefinitions>
+                    <RowDefinition x:Name="EngineListRow" Height="150" MinHeight="80"/>
+                    <RowDefinition Height="8"/>
+                  </Grid.RowDefinitions>
+                  <ListBox x:Name="EngList" Grid.Row="0" Style="{StaticResource DarkList}"/>
+                  <Thumb x:Name="EngineListResizeThumb" Grid.Row="1" Cursor="SizeNS"
+                         DragDelta="EngineListResize_DragDelta" ToolTip="Drag to resize the engine / motor list">
+                    <Thumb.Template>
+                      <ControlTemplate TargetType="Thumb">
+                        <Grid Background="Transparent">
+                          <Border x:Name="Grip" Height="3" Width="68" CornerRadius="1.5" Background="{StaticResource Line}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Grip" Property="Background" Value="{StaticResource Pink}"/></Trigger>
+                        </ControlTemplate.Triggers>
+                      </ControlTemplate>
+                    </Thumb.Template>
+                  </Thumb>
+                </Grid>
                 <Grid Margin="0,8,0,0">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                   <Button x:Name="BtnSetStock" Grid.Column="0" Content="★  Set as STOCK engine" Style="{StaticResource PinkButton}" Click="SetStock_Click" Margin="0,0,6,0"/>
@@ -1003,7 +1040,7 @@
                             ToolTip="Adds the generic Forza Edition tire graphics and compounds as extra choices without deleting the car's existing tires."/>
                   <TextBlock Style="{StaticResource Hint}"
                              Text="Adds Street, Sport, Semi-Slick, Rally, Slick, Offroad, Snow and Drag variants using the game's _FE tire models."/>
-                  <CheckBox x:Name="OptSlam" Content="Slam it — drift suspension" IsChecked="True" Margin="0,10,0,0"
+                  <CheckBox x:Name="OptSlam" Content="Remove suspension limit — drift suspension" IsChecked="True" Margin="0,10,0,0"
                             ToolTip="Adds a Drift suspension from the car's stock suspension when missing, lowers its ride-height range, and applies the steering angle below."/>
                   <Grid Margin="20,6,0,0">
                     <Grid.ColumnDefinitions>
@@ -1013,9 +1050,11 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="Steering angle" Foreground="{StaticResource Dim}" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/>
                     <TextBox x:Name="DriftSteeringAngle" Grid.Column="1" Style="{StaticResource Input}" Text="50.0"
-                             ToolTip="Degrees written to the Drift suspension's SteerMaxAngle and SteerMaxAngleFiltered fields when Slam it is applied."/>
+                             ToolTip="Degrees written to the Drift suspension's SteerMaxAngle and SteerMaxAngleFiltered fields when Remove suspension limit is applied to drift suspension."/>
                     <TextBlock Grid.Column="2" Text="°" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="6,0,0,0"/>
                   </Grid>
+                  <CheckBox x:Name="OptRaceSuspensionLimit" Content="Remove suspension limit — race suspension" Margin="0,8,0,0"
+                            ToolTip="Adds a Race suspension from the car's stock suspension when missing, then extends its lower ride-height and compression range like the Drift option. Existing Race steering angles are unchanged."/>
                   <CheckBox x:Name="OptLift" Content="Lift kit — rally suspension (+20 in)" Margin="0,8,0,0"
                             ToolTip="Adds a Rally suspension from the car's stock suspension when missing, then extends its maximum ride height exactly 20 inches (0.508 m) above stock."/>
                 </StackPanel>
@@ -1051,7 +1090,7 @@
       </ScrollViewer>
 
       <!-- ===== RIGHT: activity log ===== -->
-      <Border Grid.Column="2" Style="{StaticResource CardBorder}">
+      <Border Grid.Column="4" Style="{StaticResource CardBorder}" Margin="8,0,0,0">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

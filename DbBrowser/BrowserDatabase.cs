@@ -74,7 +74,7 @@ public sealed partial class BrowserDatabase : IDisposable
     public static BrowserDatabase Open(string path)
     {
         path = Path.GetFullPath(path);
-        string working = Path.Combine(Path.GetTempPath(), "fh6_db_browser_" + Guid.NewGuid().ToString("N") + ".sqlite");
+        string working = Path.Combine(FH6LocalCryptoTool.TempWorkspace.Root, "fh6_db_browser_" + Guid.NewGuid().ToString("N") + ".sqlite");
         SqliteConnection? db = null;
         try
         {

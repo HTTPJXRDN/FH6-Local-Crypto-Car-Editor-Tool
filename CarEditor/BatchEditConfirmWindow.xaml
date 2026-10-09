@@ -98,7 +98,7 @@
                                        FontSize="11" FontWeight="Bold" Margin="0,0,0,9"/>
                             <TextBlock x:Name="DetailsPrimary" Text="The current controls are used as the template. Rims, tire widths, profiles and track width use queued steps; existing upgrades stay, new values are sorted low-to-high, and duplicates are ignored."
                                        TextWrapping="Wrap" Foreground="{StaticResource Ink}" Margin="0,0,0,9"/>
-                            <TextBlock x:Name="DetailsSecondary" Text="Drift/rally suspension, drivetrain, tires, engines and selected power settings are included. Bodykit creation and bodykit targets are excluded."
+                            <TextBlock x:Name="DetailsSecondary" Text="Race/drift/rally suspension, drivetrain, tires, engines and selected power settings are included. Bodykit creation and bodykit targets are excluded."
                                        TextWrapping="Wrap" Foreground="{StaticResource Ink}" Margin="0,0,0,9"/>
                             <TextBlock x:Name="DetailsWarning" Text="If a car runs out of free upgrade IDs, additions already made to that car are kept. The remaining options for that car are skipped, the limit is logged, and the next car continues."
                                        TextWrapping="Wrap" Foreground="{StaticResource Dim}"/>
