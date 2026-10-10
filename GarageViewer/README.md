@@ -45,4 +45,4 @@ For a save that fails to load because an owned garage car references an incompat
 
 This can help with bad garage-car references caused by SQL Live Editor or GameDB edits, not every kind of save corruption. It cannot repair unreadable containers, damaged SQLite, missing data, unrelated progression corruption, or protected references it cannot safely remove. Restore a known-good full backup if the tool cannot load the save.
 
-Temporary work prefers A:\Forza Mod Tool Temp\Work when A: exists. Use the bundled Start Forza Mod Tool.cmd for pre-start .NET bundle extraction on that drive too. FORZA_MOD_TOOL_TEMP selects another absolute workspace root; process TEMP/TMP are isolated from Windows' global settings.
+Temporary working copies use the normal Windows temporary folder (`%TEMP%`) under `ForzaModTool\Work`. No A: drive is required or preferred. Run FH6ModStudio.exe normally; no separate launcher is needed. Process and system-wide TEMP/TMP settings are unchanged.

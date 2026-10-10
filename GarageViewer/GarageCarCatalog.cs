@@ -11,7 +11,9 @@ public sealed record GarageCarDefinition(long Id, string MediaName, long Year, b
     public string Manufacturer { get; init; } = "Unknown manufacturer";
     readonly string _friendlyName = FH6CarEditor.Naming.Friendly(MediaName);
     public string Name => _friendlyName;
-    public string DisplayName => $"{Year} {Name}";
+    public long DisplayYear => FH6CarEditor.CarDisplayNames.Year(Id, MediaName, Year);
+    public bool IsInitialDrive => FH6CarEditor.CarDisplayNames.IsInitialDrive(Id, MediaName);
+    public string DisplayName => $"{DisplayYear} {Name}";
     public override string ToString() => DisplayName;
 }
 
@@ -58,7 +60,8 @@ public sealed class GarageCarCatalog : IDisposable
             string makeId = Has("Data_Car", "MakeID") ? "MakeID" : "0";
             Cars = Read($"SELECT Id,MediaName,Year,{locked} locked,{makeId} makeId FROM Data_Car {drive}")
                 .Select(c => new GarageCarDefinition(L(c["Id"]), Convert.ToString(c["MediaName"])!, L(c["Year"]), L(c["locked"]) != 0) {
-                    Manufacturer = makes.GetValueOrDefault(L(c["makeId"]), "Unknown manufacturer")
+                    Manufacturer = FH6CarEditor.CarDisplayNames.Manufacturer(L(c["Id"]), Convert.ToString(c["MediaName"])!,
+                        makes.GetValueOrDefault(L(c["makeId"]), "Unknown manufacturer"))
                 })
                 .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ThenBy(c => c.Year).ToArray();
         } catch { _db.Dispose(); Cleanup(path); throw; }

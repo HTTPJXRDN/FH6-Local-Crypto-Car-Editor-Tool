@@ -671,9 +671,15 @@
                        Foreground="{StaticResource Ink}" MinHeight="112"/>
           </Border>
           <StackPanel Grid.Row="5" Margin="12,0,12,12">
-            <CheckBox x:Name="OptAutoshow" Content="Available in Autoshow" IsEnabled="False"
-                      Margin="0,0,0,8" Click="Autoshow_Click"
-                      ToolTip="Toggles Data_Car.NotAvailableInAutoshow for every selected car — applies instantly."/>
+            <Grid Margin="0,0,0,8">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <CheckBox x:Name="OptAutoshow" Grid.Column="0" IsEnabled="False" Click="Autoshow_Click"
+                        ToolTip="Toggles Data_Car.NotAvailableInAutoshow for every selected car — applies instantly.">
+                <TextBlock Text="Available in Autoshow" TextWrapping="Wrap"/>
+              </CheckBox>
+              <CheckBox x:Name="OptDrivable" Grid.Column="1" Content="Is drivable" IsEnabled="False" Margin="10,0,0,0"
+                        Click="Drivable_Click" ToolTip="Toggles Data_Car.IsDrivable for every selected car — applies instantly to the working copy. This flag alone does not make a placeholder car playable."/>
+            </Grid>
             <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -922,7 +928,7 @@
                 <!-- Rim sizes -->
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <CheckBox Grid.Column="0" x:Name="OptRims" Content="Rim sizes (inch)" IsChecked="True" VerticalAlignment="Top" Margin="0,4,0,0"
+                  <CheckBox Grid.Column="0" x:Name="OptRims" Content="Rim sizes (inch)" IsChecked="False" VerticalAlignment="Top" Margin="0,4,0,0"
                             ToolTip="Use absolute diameter boxes or click −1/+1 repeatedly to queue stock-relative sizes. The step buttons work in single-car and batch modes."/>
                   <StackPanel Grid.Column="1">
                     <Grid>
@@ -936,7 +942,7 @@
                 <!-- Tire widths (mm): front / rear, press + to add more per axle -->
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <CheckBox Grid.Column="0" x:Name="OptWidth" Content="Tire widths (mm)" IsChecked="True" VerticalAlignment="Top" Margin="0,4,0,0"
+                  <CheckBox Grid.Column="0" x:Name="OptWidth" Content="Tire widths (mm)" IsChecked="False" VerticalAlignment="Top" Margin="0,4,0,0"
                             ToolTip="Use absolute tread-width boxes or click −10/+10 repeatedly to queue stock-relative widths for each axle."/>
                   <StackPanel Grid.Column="1">
                     <Grid>
@@ -956,7 +962,7 @@
                 <!-- Tire profile / sidewall offsets: press + to add more (applied front & rear) -->
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                  <CheckBox Grid.Column="0" x:Name="OptAspect" Content="Tire profile (sidewall)" IsChecked="True" VerticalAlignment="Top" Margin="0,4,0,0"
+                  <CheckBox Grid.Column="0" x:Name="OptAspect" Content="Tire profile (sidewall)" IsChecked="False" VerticalAlignment="Top" Margin="0,4,0,0"
                             ToolTip="Use absolute profile boxes or click −2/+2 repeatedly to queue stock-relative offsets for front and rear."/>
                   <WrapPanel Grid.Column="1" x:Name="SWBoxes" VerticalAlignment="Center"/>
                   <Button Grid.Column="2" x:Name="AddSWBtn" Content="＋" Style="{StaticResource GhostButton}" Padding="9,2" Margin="4,0,0,0" VerticalAlignment="Top" Click="AddSW" ToolTip="Add a profile box"/>
@@ -968,7 +974,7 @@
                   <TextBlock Grid.Row="0" Grid.Column="1" x:Name="TrackExampleText" Foreground="{StaticResource Dim}"
                              FontSize="11.5" Margin="40,0,0,8" Visibility="Collapsed"
                              Text="Example offsets:  0.03  •  0.05  •  0.08  (start small)"/>
-                  <CheckBox Grid.Row="1" Grid.Column="0" x:Name="OptTrack" Content="Track width / offset" IsChecked="True" VerticalAlignment="Top" Margin="0,4,0,0"
+                  <CheckBox Grid.Row="1" Grid.Column="0" x:Name="OptTrack" Content="Track width / offset" IsChecked="False" VerticalAlignment="Top" Margin="0,4,0,0"
                             ToolTip="Use absolute offsets in metres or click +0.02 m repeatedly to extend each axle from its widest existing option."/>
                   <StackPanel Grid.Row="1" Grid.Column="1">
                     <Grid>
@@ -1040,7 +1046,7 @@
                             ToolTip="Adds the generic Forza Edition tire graphics and compounds as extra choices without deleting the car's existing tires."/>
                   <TextBlock Style="{StaticResource Hint}"
                              Text="Adds Street, Sport, Semi-Slick, Rally, Slick, Offroad, Snow and Drag variants using the game's _FE tire models."/>
-                  <CheckBox x:Name="OptSlam" Content="Remove suspension limit — drift suspension" IsChecked="True" Margin="0,10,0,0"
+                  <CheckBox x:Name="OptSlam" Content="Remove suspension limit — drift suspension" IsChecked="False" Margin="0,10,0,0"
                             ToolTip="Adds a Drift suspension from the car's stock suspension when missing, lowers its ride-height range, and applies the steering angle below."/>
                   <Grid Margin="20,6,0,0">
                     <Grid.ColumnDefinitions>
@@ -1089,9 +1095,15 @@
         </StackPanel>
       </ScrollViewer>
 
-      <!-- ===== RIGHT: activity log ===== -->
-      <Border Grid.Column="4" Style="{StaticResource CardBorder}" Margin="8,0,0,0">
-        <Grid>
+      <!-- ===== RIGHT: activity log / default model preview ===== -->
+      <Grid Grid.Column="4" Margin="8,0,0,0">
+        <Grid.RowDefinitions>
+          <RowDefinition x:Name="ActivityLogRow" Height="*" MinHeight="120"/>
+          <RowDefinition Height="8"/>
+          <RowDefinition x:Name="CarPreviewRow" Height="*" MinHeight="180"/>
+        </Grid.RowDefinitions>
+        <Border Grid.Row="0" Style="{StaticResource CardBorder}">
+          <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -1104,8 +1116,38 @@
                          Foreground="{StaticResource Dim}" FontFamily="Consolas" FontSize="12" Padding="8,6"
                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
           </Border>
-        </Grid>
-      </Border>
+          </Grid>
+        </Border>
+        <GridSplitter x:Name="CarPreviewSplitter" Grid.Row="1" Style="{StaticResource PanelResizeHandle}"
+                      ResizeDirection="Rows" Cursor="SizeNS" ToolTip="Drag to resize the activity log and car preview"/>
+        <Border Grid.Row="2" Style="{StaticResource CardBorder}">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="*"/>
+              <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Border Style="{StaticResource CardHeadStrip}"><TextBlock Style="{StaticResource CardTitle}" Text="CAR PREVIEW"/></Border>
+            <StackPanel Grid.Row="1" Margin="10,8,10,0">
+              <WrapPanel>
+                <Button Content="Auto-find" Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,5,5" Click="ThumbnailAuto_Click"/>
+                <Button Content="Folder…" Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,5,5" Click="ThumbnailFolder_Click"/>
+                <Button Content="Archive…" Style="{StaticResource GhostButton}" Padding="8,4" Margin="0,0,0,5" Click="ThumbnailArchive_Click"/>
+              </WrapPanel>
+              <TextBlock x:Name="ThumbnailSource" Text="Auto-detects when a database is loaded" Foreground="{StaticResource Dim}" FontSize="10.5" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+            <Grid Grid.Row="2" Margin="10,6">
+              <Image x:Name="CarPreviewImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+              <TextBlock x:Name="CarPreviewPlaceholder" Text="Select one car to see its default thumbnail" Foreground="{StaticResource Dim}" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8"/>
+            </Grid>
+            <StackPanel Grid.Row="3" Margin="12,0,12,10">
+              <TextBlock x:Name="CarPreviewName" Foreground="{StaticResource Pink}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+              <TextBlock x:Name="CarPreviewStatus" Foreground="{StaticResource Dim}" FontSize="10.5" TextWrapping="Wrap"/>
+            </StackPanel>
+          </Grid>
+        </Border>
+      </Grid>
 
     </Grid>
   </Grid>

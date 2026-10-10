@@ -7,6 +7,7 @@ using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
+using FH6CarEditor;
 
 namespace FH6LocalCryptoTool.GarageViewer;
 
@@ -16,6 +17,7 @@ public sealed class GarageRow(GarageEntry entry, string name, bool modelLocked) 
     // asynchronous thumbnail changes must not change a row's equality/hash.
     public GarageEntry Entry { get; } = entry;
     public string Name { get; } = name;
+    public string MediaName { get; init; } = "";
     public bool ModelLocked { get; } = modelLocked;
     public BitmapSource? Thumbnail { get; private set; }
     public string ThumbnailStatus { get; private set; } = "Not cached";
@@ -37,6 +39,11 @@ public partial class GarageViewerView : UserControl
     GarageProfileSession? _session;
     GarageCarCatalog? _catalog;
     GarageThumbnailCache? _thumbnails;
+    CarThumbnailLibrary? _stockThumbnails;
+    string? _catalogSource;
+    GarageThumbnailResolver? _resolver;
+    GarageThumbnailCache? _resolverCache;
+    CarThumbnailLibrary? _resolverStock;
     string _thumbnailMessage="Thumbnail cache not found. Choose its folder to load actual garage previews.";
     long[] _detailIds=Array.Empty<long>();
     long? _detailId=>_detailIds.Length==1?_detailIds[0]:null;
@@ -44,6 +51,7 @@ public partial class GarageViewerView : UserControl
     readonly HashSet<string> _detailMixed = new();
     GarageRow? _previewRow;
     GarageThumbnailCache? _previewCache;
+    CarThumbnailLibrary? _previewStock;
     int _previewGeneration;
     bool _updatingDetails, _restoringSelection;
     GridLength _carFieldsHeight = new(1.4,GridUnitType.Star);
@@ -72,6 +80,7 @@ public partial class GarageViewerView : UserControl
         if (_owner != null) { _owner.Closing += Owner_Closing; _owner.Closed += Owner_Closed; }
         await RunAsync(() => {
             _catalog = GarageCarCatalog.Embedded();
+            _stockThumbnails = FindStockThumbnails();
             if(Directory.Exists(GarageThumbnailCache.DefaultDirectory)) {
                 try { _thumbnails=new GarageThumbnailCache(GarageThumbnailCache.DefaultDirectory);_thumbnailMessage=$"Garage thumbnail cache: {_thumbnails.Count:N0} references (read-only)"; }
                 catch(Exception ex) when(ex is IOException or SystemException) { _thumbnailMessage="Thumbnail cache unavailable; choose its folder to retry. Garage editing is still available."; }
@@ -113,7 +122,51 @@ public partial class GarageViewerView : UserControl
     {
         if (_busy || !TryApplyCarFields()) return;
         var dialog = new OpenFileDialog { Title = "Matching full FH6 GameDB catalog", Filter = "Game databases|*.slt;*.sqlite;*.db|All files|*.*" };
-        if (dialog.ShowDialog() == true) await RunAsync(() => { var next = GarageCarCatalog.Load(dialog.FileName); var previous = _catalog; _catalog = next; previous?.Dispose(); }, "Reading car names and stock parts…");
+        if (dialog.ShowDialog() == true) await RunAsync(() => { var next = GarageCarCatalog.Load(dialog.FileName); var previous = _catalog; _catalog = next; _catalogSource=dialog.FileName; previous?.Dispose(); _stockThumbnails=FindStockThumbnails(); }, "Reading car names and stock parts…");
+    }
+    static string StockSourceSetting => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ForzaModTool", "garage-stock-thumbnail-source.json");
+    CarThumbnailLibrary? FindStockThumbnails(string? manual = null, bool resetAuto = false) {
+        string? preferred=manual;
+        if(!resetAuto && preferred==null) {
+            try { if(File.Exists(StockSourceSetting) && new FileInfo(StockSourceSetting).Length<16384) preferred=System.Text.Json.JsonSerializer.Deserialize<string>(File.ReadAllText(StockSourceSetting)); }
+            catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
+        }
+        if(preferred!=null) {
+            try {return new CarThumbnailLibrary(preferred);}
+            catch(Exception ex) when(manual==null && ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+        }
+        foreach(string path in CarThumbnailLibrary.FindSources(_catalogSource,false).Concat(new[]{CarThumbnailLibrary.SavedSource(false)}).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase)) {
+            try {return new CarThumbnailLibrary(path);}
+            catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException) { }
+        }
+        return null;
+    }
+    async void StockThumbnailFolder_Click(object sender,RoutedEventArgs e) {
+        if(_busy || !TryApplyCarFields())return;
+        var dialog=new OpenFolderDialog{Title="Choose FH6 media/Stripped folder, or stock model image folder"};
+        if(dialog.ShowDialog()==true)await RunAsync(()=>{
+            var next=FindStockThumbnails(dialog.FolderName);
+            Directory.CreateDirectory(Path.GetDirectoryName(StockSourceSetting)!);
+            File.WriteAllText(StockSourceSetting,System.Text.Json.JsonSerializer.Serialize(dialog.FolderName));
+            _stockThumbnails=next;
+        },"Indexing stock model thumbnails…");
+    }
+    async void StockThumbnailAuto_Click(object sender,RoutedEventArgs e) {
+        if(_busy || !TryApplyCarFields())return;
+        await RunAsync(()=>{
+            if(File.Exists(StockSourceSetting))File.Delete(StockSourceSetting);
+            _stockThumbnails=FindStockThumbnails(resetAuto:true);
+            // Re-read the same actual cache so newly generated garage thumbnails win.
+            string directory=_thumbnails?.DirectoryPath ?? GarageThumbnailCache.DefaultDirectory;
+            try {var next=new GarageThumbnailCache(directory);var previous=_thumbnails;_thumbnails=next;previous?.Dispose();_thumbnailMessage=$"Garage thumbnail cache: {next.Count:N0} references (read-only)";}
+            catch(Exception ex) when(ex is IOException or SystemException) { }
+        },"Finding stock thumbnails and refreshing garage cache…");
+    }
+    GarageThumbnailResolver ThumbnailResolver() {
+        if(_resolver==null || !ReferenceEquals(_resolverCache,_thumbnails) || !ReferenceEquals(_resolverStock,_stockThumbnails)) {
+            _resolverCache=_thumbnails;_resolverStock=_stockThumbnails;_resolver=new(_thumbnails,_stockThumbnails);
+        }
+        return _resolver;
     }
     async void ThumbnailFolder_Click(object sender, RoutedEventArgs e) {
         if(_busy || !TryApplyCarFields())return;
@@ -124,22 +177,21 @@ public partial class GarageViewerView : UserControl
         },"Reading thumbnail manifest…");
     }
     async Task LoadThumbnailAsync(GarageRow row) {
-        var cache=_thumbnails;
+        var cache=_thumbnails;var stock=_stockThumbnails;var resolver=ThumbnailResolver();
         if(row.ThumbnailRequested)return;row.ThumbnailRequested=true;
-        if(cache==null) {row.SetThumbnail(new(null,"Cache folder unavailable"));return;}
-        var result=await cache.GetAsync(row.Entry.ThumbnailReference);
-        if(ReferenceEquals(cache,_thumbnails))row.SetThumbnail(result);
+        var result=await resolver.GetAsync(row.Entry.ThumbnailReference,row.CarId,row.MediaName);
+        if(ReferenceEquals(cache,_thumbnails) && ReferenceEquals(stock,_stockThumbnails))row.SetThumbnail(result);
     }
     void SyncPreview(GarageRow? car) {
-        if(ReferenceEquals(_previewRow,car)&&ReferenceEquals(_previewCache,_thumbnails))return;
-        _previewRow=car;_previewCache=_thumbnails;int generation=++_previewGeneration;
+        if(ReferenceEquals(_previewRow,car)&&ReferenceEquals(_previewCache,_thumbnails)&&ReferenceEquals(_previewStock,_stockThumbnails))return;
+        _previewRow=car;_previewCache=_thumbnails;_previewStock=_stockThumbnails;int generation=++_previewGeneration;
         SelectedCarPreview.Source=null;SelectedPreviewStatus.Text="";SelectedPreviewPlaceholder.Visibility=Visibility.Visible;
         SelectedPreviewPlaceholder.Text=car==null?"Select one car for its preview":"Loading garage preview…";
-        if(car!=null)_=LoadSelectedPreviewAsync(car,_thumbnails,generation);
+        if(car!=null)_=LoadSelectedPreviewAsync(car,_thumbnails,_stockThumbnails,ThumbnailResolver(),generation);
     }
-    async Task LoadSelectedPreviewAsync(GarageRow car,GarageThumbnailCache? cache,int generation) {
-        var result=cache==null?new GarageThumbnailResult(null,"Cache folder unavailable"):await cache.GetPreviewAsync(car.Entry.ThumbnailReference);
-        if(generation!=_previewGeneration || !ReferenceEquals(cache,_thumbnails))return;
+    async Task LoadSelectedPreviewAsync(GarageRow car,GarageThumbnailCache? cache,CarThumbnailLibrary? stock,GarageThumbnailResolver resolver,int generation) {
+        var result=await resolver.GetAsync(car.Entry.ThumbnailReference,car.CarId,car.MediaName,true);
+        if(generation!=_previewGeneration || !ReferenceEquals(cache,_thumbnails) || !ReferenceEquals(stock,_stockThumbnails))return;
         SelectedCarPreview.Source=result.Image;
         SelectedPreviewStatus.Text=result.Image==null?"":car.Name+" • "+result.Status;
         SelectedPreviewPlaceholder.Text=result.Status;SelectedPreviewPlaceholder.Visibility=result.Image==null?Visibility.Visible:Visibility.Collapsed;
@@ -154,11 +206,13 @@ public partial class GarageViewerView : UserControl
     {
         var models = _catalog?.Cars.ToDictionary(c => c.Id);
         _rows = _session?.Entries().Select(c => models != null && models.TryGetValue(c.CarId, out var model)
-            ? new GarageRow(c, model.DisplayName, model.RemovalLocked) { Manufacturer = model.Manufacturer } : new GarageRow(c, $"Unknown car ({c.CarId}) — load matching GameDB", false)).ToArray() ?? Array.Empty<GarageRow>();
+            ? new GarageRow(c, model.DisplayName + (model.IsInitialDrive ? " [Initial Drive variant]" : ""), model.RemovalLocked) { Manufacturer = model.Manufacturer, MediaName=model.MediaName } : new GarageRow(c, $"Unknown car ({c.CarId}) — load matching GameDB", false)).ToArray() ?? Array.Empty<GarageRow>();
         LoadedPath.Text = _session == null ? "Open or drop a C_ProfileData save here. The original file is never overwritten."
             : _session.SourcePath + (_session.HasChanges ? " • unexported edits" : " • private working copy") + (_session.CanEdit ? "" : "\n" + _session.EditRestriction);
-        CatalogLabel.Text = _catalog == null ? "No car catalog loaded." : $"{_catalog.Label} • {_catalog.Cars.Count:N0} models • load your GameDB for newer/custom cars";
+        CatalogLabel.Text = _catalog == null ? "No car catalog loaded." : $"{_catalog.Label} • {_catalog.Cars.Count(c => !c.IsInitialDrive):N0} selectable models • load your GameDB for newer/custom cars";
         ThumbnailCacheLabel.Text=_thumbnailMessage;
+        StockThumbnailLabel.Text=_stockThumbnails==null?"Stock fallback not found • Auto-find or choose a folder":$"Stock fallback: {_stockThumbnails.Count:N0} models • cached images first";
+        StockThumbnailLabel.ToolTip=_stockThumbnails?.SourcePath;
         ApplyGarageFilter(); ApplyCatalogFilter();
         if (selectId.HasValue) { GarageGrid.SelectedItems.Clear(); GarageGrid.SelectedItem = _rows.FirstOrDefault(c => c.Id == selectId.Value); RevealGarageSelection(); }
         UpdateButtons();
@@ -180,7 +234,7 @@ public partial class GarageViewerView : UserControl
     {
         var selected = CatalogList.SelectedItems.Cast<GarageCarDefinition>().Select(c => c.Id).ToHashSet();
         string query = CatalogSearch.Text.Trim();
-        var filtered = _catalog?.Cars.Where(c => Matches(c.DisplayName, c.Id, query) || c.Manufacturer.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray() ?? Array.Empty<GarageCarDefinition>();
+        var filtered = _catalog?.Cars.Where(c => !c.IsInitialDrive && (Matches(c.DisplayName, c.Id, query) || c.Manufacturer.Contains(query, StringComparison.OrdinalIgnoreCase))).ToArray() ?? Array.Empty<GarageCarDefinition>();
         CatalogList.ItemsSource = Grouped(filtered);
         foreach(var car in filtered.Where(c => selected.Contains(c.Id))) CatalogList.SelectedItems.Add(car);
         ExpandSearchResults(CatalogList, query);

@@ -10,7 +10,7 @@
     <Product>FH6 Local Mod Tool</Product>
     <Title>FH6 Local Mod Tool</Title>
     <Description>Edit FH6 databases, cars, animations, and profile saves in one app.</Description>
-    <Version>1.2.6</Version>
+    <Version>1.2.6.1</Version>
     <FileVersion>1.2.6.1</FileVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\ICO\dbtool_icon.ico</ApplicationIcon>
@@ -26,6 +26,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+    <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
     <Compile Remove="CryptoRuntime\**\*.cs" />
   </ItemGroup>
   <ItemGroup>

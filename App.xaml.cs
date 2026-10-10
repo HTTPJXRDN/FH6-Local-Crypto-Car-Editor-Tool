@@ -8,7 +8,7 @@ public partial class App : Application
     {
         try { TempWorkspace.Initialize(); }
         catch (Exception ex) {
-            MessageBox.Show("The temporary workspace could not be opened. No fallback to C: was used.\n\n" + ex.Message, "Forza Mod Tool", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show("The Windows temporary folder could not be used for the tool's working files. Check its permissions and available space.\n\n" + ex.Message, "Forza Mod Tool", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1); return;
         }
         base.OnStartup(e);
